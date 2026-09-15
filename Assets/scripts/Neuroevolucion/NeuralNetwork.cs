@@ -20,19 +20,16 @@ public class NeuralNetwork
             return new float[outputCount];
         }
 
-        // 1. Filtrar y ordenar los nodos por su tipo
         List<NEATNode> inputNodes = nodes.FindAll(n => n.type == NEATNode.NodeType.Input);
         List<NEATNode> outputNodes = nodes.FindAll(n => n.type == NEATNode.NodeType.Output);
         List<NEATNode> hiddenNodes = nodes.FindAll(n => n.type == NEATNode.NodeType.Hidden);
 
-        // 2. Asignar las entradas a los nodos de entrada
         int inputsToAssign = Mathf.Min(inputValues.Length, inputNodes.Count);
         for (int i = 0; i < inputsToAssign; i++)
         {
             inputNodes[i].value = inputValues[i];
         }
 
-        // 3. Procesar las neuronas ocultas si existen
         for (int i = 0; i < hiddenNodes.Count; i++)
         {
             float sum = 0f;
@@ -52,7 +49,6 @@ public class NeuralNetwork
             hiddenNodes[i].value = (float)System.Math.Tanh(sum);
         }
 
-        // 4. Procesar las neuronas de salida
         float[] outputs = new float[outputCount];
         for (int i = 0; i < outputNodes.Count && i < outputCount; i++)
         {

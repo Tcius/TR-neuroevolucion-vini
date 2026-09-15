@@ -4,7 +4,7 @@ using UnityEngine;
 public class AgentController : MonoBehaviour
 {
     private Pacman pacmanScript;
-    private EvolutionManager.Genome myGenome;
+    private EvolutionManager.Genome myGenomePrivate;
     private float timeAlive = 0f;
     private int individualScore = 0;
     private bool isDead = false;
@@ -14,13 +14,18 @@ public class AgentController : MonoBehaviour
     private int newTilesVisited = 0;
     private bool diedFromStagnation = false;
 
-    private const float MaxTimeWithoutProgress = 3f;
+    private const float MaxTimeWithoutProgress = 3.5f;
     private const float StagnationPenalty = 50f;
+
+    public EvolutionManager.Genome MyGenome
+    {
+        get { return myGenomePrivate; }
+    }
 
     public void Setup(EvolutionManager.Genome genome)
     {
         pacmanScript = GetComponent<Pacman>();
-        myGenome = genome;
+        myGenomePrivate = genome;
         timeAlive = 0f;
         individualScore = 0;
         isDead = false;
@@ -44,15 +49,13 @@ public class AgentController : MonoBehaviour
 
         Vector2Int currentTile = GetCurrentTile();
 
-        // Solo si pisa una casilla NO visitada previamente reseteamos el temporizador
         if (visitedTiles.Add(currentTile))
         {
             newTilesVisited++;
             timeSinceLastProgress = 0f;
         }
 
-        // Filtro de inactividad / estancamiento a los 3.5 segundos
-        if (timeSinceLastProgress >= 3.5f)
+        if (timeSinceLastProgress >= MaxTimeWithoutProgress)
         {
             diedFromStagnation = true;
             UpdateFitness();
@@ -61,7 +64,7 @@ public class AgentController : MonoBehaviour
         }
 
         float[] inputs = GetSensorInputs();
-        float[] outputs = myGenome.network.FeedForward(inputs, 4);
+        float[] outputs = myGenomePrivate.network.FeedForward(inputs, 4);
 
         pacmanScript.ProcessOutputs(outputs);
 
@@ -114,9 +117,7 @@ public class AgentController : MonoBehaviour
 
         if (closestPellet != null)
         {
-            Vector2 diff =
-                (closestPellet.transform.position - transform.position).normalized;
-
+            Vector2 diff = (closestPellet.transform.position - transform.position).normalized;
             inputs[8] = diff.x;
             inputs[9] = diff.y;
         }
@@ -128,9 +129,7 @@ public class AgentController : MonoBehaviour
 
         if (closestPowerPellet != null)
         {
-            Vector2 diffPower =
-                (closestPowerPellet.transform.position - transform.position).normalized;
-
+            Vector2 diffPower = (closestPowerPellet.transform.position - transform.position).normalized;
             inputs[10] = diffPower.x;
             inputs[11] = diffPower.y;
         }
@@ -143,19 +142,13 @@ public class AgentController : MonoBehaviour
     private GameObject FindClosestWithTag(string tag)
     {
         GameObject[] targets = GameObject.FindGameObjectsWithTag(tag);
-
         GameObject closest = null;
         float minDistance = Mathf.Infinity;
-
         Vector3 currentPos = transform.position;
 
         foreach (GameObject target in targets)
         {
-            float distance = Vector3.Distance(
-                target.transform.position,
-                currentPos
-            );
-
+            float distance = Vector3.Distance(target.transform.position, currentPos);
             if (distance < minDistance && distance < 15f)
             {
                 closest = target;
@@ -168,9 +161,9 @@ public class AgentController : MonoBehaviour
 
     private void UpdateFitness()
     {
-        myGenome.fitness =
+        myGenomePrivate.fitness =
             individualScore
-            + (newTilesVisited *1.5f)
+            + (newTilesVisited * 1.5f)
             + (timeAlive * 0.1f)
             - (diedFromStagnation ? StagnationPenalty : 0f);
     }
@@ -187,17 +180,16 @@ public class AgentController : MonoBehaviour
     {
         if (isDead) return;
 
-        // Comer bolitas resetea el temporizador de progreso
         if (other.CompareTag("Pellet"))
         {
             individualScore += 10;
-            timeSinceLastProgress = 0f; 
+            timeSinceLastProgress = 0f;
             other.gameObject.SetActive(false);
         }
         else if (other.CompareTag("PowerPellet"))
         {
             individualScore += 50;
-            timeSinceLastProgress = 0f; 
+            timeSinceLastProgress = 0f;
             other.gameObject.SetActive(false);
         }
     }
@@ -213,7 +205,7 @@ public class AgentController : MonoBehaviour
 
     public float GetFitness()
     {
-        return myGenome != null ? myGenome.fitness : 0f;
+        return myGenomePrivate != null ? myGenomePrivate.fitness : 0f;
     }
 
     public void SetHighlight(bool isLeader)
@@ -226,21 +218,16 @@ public class AgentController : MonoBehaviour
         if (sprite != null)
         {
             if (isLeader)
-                sprite.color = Color.darkRed;
+                sprite.color = Color.green;
             else
                 sprite.color = Color.yellow;
         }
 
         transform.localScale = Vector3.one;
     }
+
     public float[] GetSensorInputsForVisualizer()
     {
         return GetSensorInputs();
     }
-
-    public EvolutionManager.Genome MyGenome 
-    { 
-        get { return myGenome; } 
-    }
-    
 }

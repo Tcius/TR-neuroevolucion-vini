@@ -311,8 +311,8 @@ public class EvolutionManager : MonoBehaviour
             }
         }
 
-        if (Random.Range(0f, 1f) < 0.001f) MutateAddConnection(genome);
-        if (Random.Range(0f, 1f) < 0.0005f) MutateAddNode(genome);
+        if (Random.Range(0f, 1f) < 0.002f) MutateAddConnection(genome);
+        if (Random.Range(0f, 1f) < 0.001f) MutateAddNode(genome);
     }
 
     private void MutateAddConnection(Genome genome)
