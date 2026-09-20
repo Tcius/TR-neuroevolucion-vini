@@ -15,7 +15,7 @@ public class AgentController : MonoBehaviour
     private bool diedFromStagnation = false;
 
     private const float MaxTimeWithoutProgress = 3.5f;
-    private const float StagnationPenalty = 50f;
+    private const float StagnationPenalty = 100f;
 
     public EvolutionManager.Genome MyGenome
     {
@@ -163,8 +163,8 @@ public class AgentController : MonoBehaviour
     {
         myGenomePrivate.fitness =
             individualScore
-            + (newTilesVisited * 1.5f)
-            + (timeAlive * 0.1f)
+            + (newTilesVisited * 2f)
+            + (timeAlive)
             - (diedFromStagnation ? StagnationPenalty : 0f);
     }
 
@@ -218,7 +218,7 @@ public class AgentController : MonoBehaviour
         if (sprite != null)
         {
             if (isLeader)
-                sprite.color = Color.green;
+                sprite.color = Color.darkRed;
             else
                 sprite.color = Color.yellow;
         }

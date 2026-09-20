@@ -7,6 +7,7 @@ public class EvolutionManager : MonoBehaviour
     [Header("Evolution Settings")]
     public int populationSize = 20;
     public float generationDuration = 20f;
+    public float tau = 90f;
 
     [HideInInspector] public List<Genome> population = new List<Genome>();
     [HideInInspector] public List<AgentController> activeAgents = new List<AgentController>();
@@ -290,9 +291,18 @@ public class EvolutionManager : MonoBehaviour
         return new Genome(newNet);
     }
 
+    private float GetDynamicMutationRate(float pMax, float pMin, float Tau)
+    {
+        float currentRate = pMin + (pMax - pMin) * Mathf.Exp(-generationCount / Tau);
+        return Mathf.Clamp(currentRate, pMin, pMax);
+    }
+
     private void Mutate(Genome genome)
     {
         if (genome == null || genome.network == null) return;
+
+        float connMutationRate   = GetDynamicMutationRate(0.05f, 0.0005f, tau);
+        float nodeMutationRate   = GetDynamicMutationRate(0.02f, 0.0002f, tau);
 
         for (int i = 0; i < genome.network.connections.Count; i++)
         {
@@ -311,8 +321,8 @@ public class EvolutionManager : MonoBehaviour
             }
         }
 
-        if (Random.Range(0f, 1f) < 0.002f) MutateAddConnection(genome);
-        if (Random.Range(0f, 1f) < 0.001f) MutateAddNode(genome);
+        if (Random.Range(0f, 1f) < connMutationRate) MutateAddConnection(genome);
+        if (Random.Range(0f, 1f) < nodeMutationRate) MutateAddNode(genome);
     }
 
     private void MutateAddConnection(Genome genome)
