@@ -1,10 +1,20 @@
+using System.Collections.Generic;
 using UnityEngine;
+
 [RequireComponent(typeof(Movement))]
 public class Pacman : MonoBehaviour
 {
     private SpriteRenderer spriteRenderer;
     private CircleCollider2D circleCollider;
     private Movement movement;
+
+    private Node currentNode;
+    private bool waitingForDecision = false;
+
+    public bool NeedsDecision
+    {
+        get { return waitingForDecision && currentNode != null; }
+    }
 
     private void Awake()
     {
@@ -15,28 +25,20 @@ public class Pacman : MonoBehaviour
 
     private void Update()
     {
-        // if (Input.GetKeyDown(KeyCode.W) || Input.GetKeyDown(KeyCode.UpArrow)) {
-        //     UP();
-        // }
-        // else if (Input.GetKeyDown(KeyCode.S) || Input.GetKeyDown(KeyCode.DownArrow)) {
-        //     DOWN();
-        // }
-        // else if (Input.GetKeyDown(KeyCode.A) || Input.GetKeyDown(KeyCode.LeftArrow)) {
-        //     LEFT();
-        // }
-        // else if (Input.GetKeyDown(KeyCode.D) || Input.GetKeyDown(KeyCode.RightArrow)) {
-        //     RIGHT();
-        // }
-
         float angle = Mathf.Atan2(movement.direction.y, movement.direction.x);
         transform.rotation = Quaternion.AngleAxis(angle * Mathf.Rad2Deg, Vector3.forward);
     }
+
     public void ResetState()
     {
         enabled = true;
         spriteRenderer.enabled = true;
         circleCollider.enabled = true;
         movement.ResetState();
+
+        currentNode = null;
+        waitingForDecision = false;
+
         gameObject.SetActive(true);
     }
 
@@ -44,50 +46,94 @@ public class Pacman : MonoBehaviour
     {
         movement.SetDirection(Vector2.up);
     }
+
     public void DOWN()
     {
         movement.SetDirection(Vector2.down);
     }
+
     public void LEFT()
     {
         movement.SetDirection(Vector2.left);
     }
+
     public void RIGHT()
     {
         movement.SetDirection(Vector2.right);
     }
-    
-
 
     public void ProcessOutputs(float[] outputs)
     {
+        if (!NeedsDecision) return;
         if (outputs == null || outputs.Length < 4) return;
+        if (currentNode.availableDirections == null || currentNode.availableDirections.Count == 0) return;
 
-        int maxIndex = 0;
-        float maxValue = outputs[0];
+        Vector2 currentDirection = movement.direction;
 
-        for (int i = 1; i < outputs.Length; i++)
+        if (currentDirection == Vector2.zero)
         {
-            if (outputs[i] > maxValue)
+            currentDirection = movement.initialDirection;
+        }
+
+        Vector2[] possibleDirections =
+        {
+            currentDirection,
+            new Vector2(-currentDirection.y, currentDirection.x),
+            new Vector2(currentDirection.y, -currentDirection.x),
+            -currentDirection
+        };
+
+        bool hasNonReverseOption = false;
+
+        for (int i = 0; i < 3; i++)
+        {
+            if (currentNode.availableDirections.Contains(possibleDirections[i]))
             {
-                maxValue = outputs[i];
-                maxIndex = i;
+                hasNonReverseOption = true;
+                break;
             }
         }
 
-        Vector2 direction = Vector2.zero;
-        switch (maxIndex)
+        int bestOutputIndex = -1;
+        float bestOutputValue = float.MinValue;
+
+        for (int i = 0; i < 4; i++)
         {
-            case 0: direction = Vector2.up; break;
-            case 1: direction = Vector2.down; break;
-            case 2: direction = Vector2.left; break;
-            case 3: direction = Vector2.right; break;
+            Vector2 targetDirection = possibleDirections[i];
+
+            if (!currentNode.availableDirections.Contains(targetDirection))
+            {
+                continue;
+            }
+
+            if (i == 3 && hasNonReverseOption)
+            {
+                continue;
+            }
+
+            if (outputs[i] > bestOutputValue)
+            {
+                bestOutputValue = outputs[i];
+                bestOutputIndex = i;
+            }
         }
 
-        // Llama al componente Movement asignado en el script
-        if (this.movement != null)
+        if (bestOutputIndex >= 0)
         {
-            this.movement.SetDirection(direction);
+            movement.SetDirection(possibleDirections[bestOutputIndex]);
+        }
+
+        waitingForDecision = false;
+    }
+
+    private void OnTriggerEnter2D(Collider2D other)
+    {
+        Node node = other.GetComponent<Node>();
+
+        if (node != null)
+        {
+            currentNode = node;
+            waitingForDecision = true;
         }
     }
 }

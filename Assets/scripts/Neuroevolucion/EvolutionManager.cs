@@ -7,7 +7,11 @@ public class EvolutionManager : MonoBehaviour
     [Header("Evolution Settings")]
     public int populationSize = 20;
     public float generationDuration = 20f;
-    public float tau = 90f;
+
+    [Header("Mutation Settings")]
+    public float weightMutationRate = 0.15f;
+    public float addConnectionMutationRate = 0.05f;
+    public float addNodeMutationRate = 0.02f;
 
     [HideInInspector] public List<Genome> population = new List<Genome>();
     [HideInInspector] public List<AgentController> activeAgents = new List<AgentController>();
@@ -58,13 +62,23 @@ public class EvolutionManager : MonoBehaviour
 
         public float[] FeedForward(float[] inputValues, int outputCount)
         {
-            if (nodes == null || nodes.Count == 0) return new float[outputCount];
+            if (nodes == null || nodes.Count == 0)
+                return new float[outputCount];
 
-            List<NEATNode> inputNodes = nodes.FindAll(n => n.type == NEATNode.NodeType.Input);
-            List<NEATNode> outputNodes = nodes.FindAll(n => n.type == NEATNode.NodeType.Output);
-            List<NEATNode> hiddenNodes = nodes.FindAll(n => n.type == NEATNode.NodeType.Hidden);
+            List<NEATNode> inputNodes =
+                nodes.FindAll(n => n.type == NEATNode.NodeType.Input);
 
-            int inputsToAssign = Mathf.Min(inputValues.Length, inputNodes.Count);
+            List<NEATNode> outputNodes =
+                nodes.FindAll(n => n.type == NEATNode.NodeType.Output);
+
+            List<NEATNode> hiddenNodes =
+                nodes.FindAll(n => n.type == NEATNode.NodeType.Hidden);
+
+            int inputsToAssign = Mathf.Min(
+                inputValues.Length,
+                inputNodes.Count
+            );
+
             for (int i = 0; i < inputsToAssign; i++)
             {
                 inputNodes[i].value = inputValues[i];
@@ -73,33 +87,52 @@ public class EvolutionManager : MonoBehaviour
             for (int i = 0; i < hiddenNodes.Count; i++)
             {
                 float sum = 0f;
+
                 if (connections != null)
                 {
                     foreach (NEATConnection conn in connections)
                     {
-                        if (conn != null && conn.enabled && conn.toNode != null && conn.toNode.id == hiddenNodes[i].id)
+                        if (conn != null &&
+                            conn.enabled &&
+                            conn.toNode != null &&
+                            conn.toNode.id == hiddenNodes[i].id)
                         {
-                            if (conn.fromNode != null) sum += conn.fromNode.value * conn.weight;
+                            if (conn.fromNode != null)
+                            {
+                                sum += conn.fromNode.value * conn.weight;
+                            }
                         }
                     }
                 }
+
                 hiddenNodes[i].value = (float)System.Math.Tanh(sum);
             }
 
             float[] outputs = new float[outputCount];
-            for (int i = 0; i < outputNodes.Count && i < outputCount; i++)
+
+            for (int i = 0;
+                 i < outputNodes.Count && i < outputCount;
+                 i++)
             {
                 float sum = 0f;
+
                 if (connections != null)
                 {
                     foreach (NEATConnection conn in connections)
                     {
-                        if (conn != null && conn.enabled && conn.toNode != null && conn.toNode.id == outputNodes[i].id)
+                        if (conn != null &&
+                            conn.enabled &&
+                            conn.toNode != null &&
+                            conn.toNode.id == outputNodes[i].id)
                         {
-                            if (conn.fromNode != null) sum += conn.fromNode.value * conn.weight;
+                            if (conn.fromNode != null)
+                            {
+                                sum += conn.fromNode.value * conn.weight;
+                            }
                         }
                     }
                 }
+
                 outputNodes[i].value = (float)System.Math.Tanh(sum);
                 outputs[i] = outputNodes[i].value;
             }
@@ -123,7 +156,11 @@ public class EvolutionManager : MonoBehaviour
 
     private void Awake()
     {
-        saveFolderPath = Path.Combine(Application.persistentDataPath, "Genomes");
+        saveFolderPath = Path.Combine(
+            Application.persistentDataPath,
+            "Genomes"
+        );
+
         if (!Directory.Exists(saveFolderPath))
         {
             Directory.CreateDirectory(saveFolderPath);
@@ -139,9 +176,11 @@ public class EvolutionManager : MonoBehaviour
 
     public float GetCurrentGenerationMaxFitness()
     {
-        if (population == null || population.Count == 0) return 0f;
+        if (population == null || population.Count == 0)
+            return 0f;
 
         float max = 0f;
+
         for (int i = 0; i < population.Count; i++)
         {
             if (population[i].fitness > max)
@@ -149,8 +188,10 @@ public class EvolutionManager : MonoBehaviour
                 max = population[i].fitness;
             }
         }
+
         return max;
     }
+
     private void Update()
     {
         timer += Time.deltaTime;
@@ -166,14 +207,19 @@ public class EvolutionManager : MonoBehaviour
     private void InitializePopulation()
     {
         population = new List<Genome>();
+
         int latestGen = GetLatestGenerationNumber();
 
         if (latestGen > 0)
         {
             Genome savedChampion = LoadChampionGenome(latestGen);
-            if (savedChampion != null && savedChampion.network != null && savedChampion.network.nodes != null)
+
+            if (savedChampion != null &&
+                savedChampion.network != null &&
+                savedChampion.network.nodes != null)
             {
                 generationCount = latestGen + 1;
+
                 population.Add(savedChampion);
 
                 while (population.Count < populationSize)
@@ -182,6 +228,7 @@ public class EvolutionManager : MonoBehaviour
                     Mutate(child);
                     population.Add(child);
                 }
+
                 return;
             }
         }
@@ -192,17 +239,42 @@ public class EvolutionManager : MonoBehaviour
         {
             NeuralNetwork net = new NeuralNetwork();
 
-            for (int j = 0; j < 13; j++) net.nodes.Add(new NEATNode(j, NEATNode.NodeType.Input));
-            for (int k = 0; k < 4; k++) net.nodes.Add(new NEATNode(13 + k, NEATNode.NodeType.Output));
+            for (int j = 0; j < 13; j++)
+            {
+                net.nodes.Add(
+                    new NEATNode(
+                        j,
+                        NEATNode.NodeType.Input
+                    )
+                );
+            }
+
+            for (int k = 0; k < 4; k++)
+            {
+                net.nodes.Add(
+                    new NEATNode(
+                        13 + k,
+                        NEATNode.NodeType.Output
+                    )
+                );
+            }
 
             for (int j = 0; j < 13; j++)
             {
                 for (int k = 0; k < 4; k++)
                 {
-                    float w = Random.Range(-1f, 1f);
-                    net.connections.Add(new NEATConnection(net.nodes[j], net.nodes[13 + k], w));
+                    float weight = Random.Range(-1f, 1f);
+
+                    net.connections.Add(
+                        new NEATConnection(
+                            net.nodes[j],
+                            net.nodes[13 + k],
+                            weight
+                        )
+                    );
                 }
             }
+
             population.Add(new Genome(net));
         }
     }
@@ -210,6 +282,7 @@ public class EvolutionManager : MonoBehaviour
     private void StartGeneration()
     {
         timer = 0f;
+
         if (spawner != null)
         {
             activeAgents = spawner.SpawnPopulation(population);
@@ -219,24 +292,37 @@ public class EvolutionManager : MonoBehaviour
     private void NextGeneration()
     {
         Genome best = GetBestGenome();
-        SaveChampionGenome(best, generationCount);
 
-        List<Genome> newPopulation = new List<Genome>();
-        
-        Genome championCopy = CloneGenome(best);
+        SaveChampionGenome(
+            best,
+            generationCount
+        );
+
+        List<Genome> newPopulation =
+            new List<Genome>();
+
+        Genome championCopy =
+            CloneGenome(best);
+
         newPopulation.Add(championCopy);
-
 
         while (newPopulation.Count < populationSize)
         {
-            Genome parent = SelectParentByTournament(2); 
-            Genome child = CloneGenome(parent);
+            Genome parent =
+                SelectParentByTournament(2);
+
+            Genome child =
+                CloneGenome(parent);
+
             Mutate(child);
+
             newPopulation.Add(child);
         }
 
         population = newPopulation;
+
         generationCount++;
+
         StartGeneration();
     }
 
@@ -246,8 +332,17 @@ public class EvolutionManager : MonoBehaviour
 
         for (int i = 0; i < tournamentSize; i++)
         {
-            Genome randomGenome = population[Random.Range(0, population.Count)];
-            if (bestInTournament == null || randomGenome.fitness > bestInTournament.fitness)
+            Genome randomGenome =
+                population[
+                    Random.Range(
+                        0,
+                        population.Count
+                    )
+                ];
+
+            if (bestInTournament == null ||
+                randomGenome.fitness >
+                bestInTournament.fitness)
             {
                 bestInTournament = randomGenome;
             }
@@ -259,143 +354,305 @@ public class EvolutionManager : MonoBehaviour
     private Genome GetBestGenome()
     {
         Genome best = population[0];
-        foreach (Genome g in population)
+
+        foreach (Genome genome in population)
         {
-            if (g.fitness > best.fitness) best = g;
+            if (genome.fitness > best.fitness)
+            {
+                best = genome;
+            }
         }
+
         return best;
     }
 
     private Genome CloneGenome(Genome parent)
     {
-        NeuralNetwork newNet = new NeuralNetwork();
-        Dictionary<int, NEATNode> nodeMap = new Dictionary<int, NEATNode>();
+        NeuralNetwork newNet =
+            new NeuralNetwork();
 
-        foreach (NEATNode n in parent.network.nodes)
+        Dictionary<int, NEATNode> nodeMap =
+            new Dictionary<int, NEATNode>();
+
+        foreach (NEATNode node in parent.network.nodes)
         {
-            NEATNode newNode = new NEATNode(n.id, n.type);
+            NEATNode newNode =
+                new NEATNode(
+                    node.id,
+                    node.type
+                );
+
             newNet.nodes.Add(newNode);
-            nodeMap.Add(n.id, newNode);
+
+            nodeMap.Add(
+                node.id,
+                newNode
+            );
         }
 
-        foreach (NEATConnection c in parent.network.connections)
+        foreach (NEATConnection connection
+                 in parent.network.connections)
         {
-            if (nodeMap.ContainsKey(c.fromNode.id) && nodeMap.ContainsKey(c.toNode.id))
+            if (nodeMap.ContainsKey(
+                    connection.fromNode.id) &&
+                nodeMap.ContainsKey(
+                    connection.toNode.id))
             {
-                NEATConnection newConn = new NEATConnection(nodeMap[c.fromNode.id], nodeMap[c.toNode.id], c.weight);
-                newConn.enabled = c.enabled;
-                newNet.connections.Add(newConn);
+                NEATConnection newConnection =
+                    new NEATConnection(
+                        nodeMap[
+                            connection.fromNode.id
+                        ],
+                        nodeMap[
+                            connection.toNode.id
+                        ],
+                        connection.weight
+                    );
+
+                newConnection.enabled =
+                    connection.enabled;
+
+                newNet.connections.Add(
+                    newConnection
+                );
             }
         }
 
         return new Genome(newNet);
     }
 
-    private float GetDynamicMutationRate(float pMax, float pMin, float Tau)
-    {
-        float currentRate = pMin + (pMax - pMin) * Mathf.Exp(-generationCount / Tau);
-        return Mathf.Clamp(currentRate, pMin, pMax);
-    }
-
     private void Mutate(Genome genome)
     {
-        if (genome == null || genome.network == null) return;
-
-        float connMutationRate   = GetDynamicMutationRate(0.05f, 0.0005f, tau);
-        float nodeMutationRate   = GetDynamicMutationRate(0.02f, 0.0002f, tau);
-
-        for (int i = 0; i < genome.network.connections.Count; i++)
+        if (genome == null ||
+            genome.network == null)
         {
-            if (Random.Range(0f, 1f) < 0.8f)
+            return;
+        }
+
+        for (int i = 0;
+             i < genome.network.connections.Count;
+             i++)
+        {
+            NEATConnection connection =
+                genome.network.connections[i];
+
+            if (connection == null)
+                continue;
+
+            if (Random.Range(0f, 1f) <
+                weightMutationRate)
             {
-                if (Random.Range(0f, 1f) < 0.2f)
+                if (Random.Range(0f, 1f) < 0.1f)
                 {
-                    genome.network.connections[i].weight = Random.Range(-2f, 2f);
+                    connection.weight =
+                        Random.Range(-1f, 1f);
                 }
                 else
                 {
-                    float change = Random.Range(-0.4f, 0.4f);
-                    genome.network.connections[i].weight += change;
-                    genome.network.connections[i].weight = Mathf.Clamp(genome.network.connections[i].weight, -3f, 3f);
+                    float change =
+                        Random.Range(-0.25f, 0.25f);
+
+                    connection.weight += change;
+
+                    connection.weight =
+                        Mathf.Clamp(
+                            connection.weight,
+                            -3f,
+                            3f
+                        );
                 }
             }
         }
 
-        if (Random.Range(0f, 1f) < connMutationRate) MutateAddConnection(genome);
-        if (Random.Range(0f, 1f) < nodeMutationRate) MutateAddNode(genome);
+        if (Random.Range(0f, 1f) <
+            addConnectionMutationRate)
+        {
+            MutateAddConnection(genome);
+        }
+
+        if (Random.Range(0f, 1f) <
+            addNodeMutationRate)
+        {
+            MutateAddNode(genome);
+        }
     }
 
     private void MutateAddConnection(Genome genome)
     {
-        List<NEATNode> nodes = genome.network.nodes;
-        if (nodes.Count < 2) return;
+        List<NEATNode> nodes =
+            genome.network.nodes;
 
-        NEATNode n1 = nodes[Random.Range(0, nodes.Count)];
-        NEATNode n2 = nodes[Random.Range(0, nodes.Count)];
+        if (nodes.Count < 2)
+            return;
 
-        if (n1.type == NEATNode.NodeType.Output && n2.type == NEATNode.NodeType.Input)
+        NEATNode n1 =
+            nodes[
+                Random.Range(
+                    0,
+                    nodes.Count
+                )
+            ];
+
+        NEATNode n2 =
+            nodes[
+                Random.Range(
+                    0,
+                    nodes.Count
+                )
+            ];
+
+        if (n1.type ==
+                NEATNode.NodeType.Output &&
+            n2.type ==
+                NEATNode.NodeType.Input)
         {
             NEATNode temp = n1;
             n1 = n2;
             n2 = temp;
         }
 
-        bool exists = genome.network.connections.Exists(c => c.fromNode.id == n1.id && c.toNode.id == n2.id);
-        if (!exists && n1.id != n2.id)
+        bool exists =
+            genome.network.connections.Exists(
+                c =>
+                    c.fromNode.id == n1.id &&
+                    c.toNode.id == n2.id
+            );
+
+        if (!exists &&
+            n1.id != n2.id)
         {
-            genome.network.connections.Add(new NEATConnection(n1, n2, Random.Range(-1f, 1f)));
+            genome.network.connections.Add(
+                new NEATConnection(
+                    n1,
+                    n2,
+                    Random.Range(-1f, 1f)
+                )
+            );
         }
     }
 
     private void MutateAddNode(Genome genome)
     {
-        if (genome.network.connections.Count == 0) return;
+        if (genome.network.connections.Count == 0)
+            return;
 
-        NEATConnection conn = genome.network.connections[Random.Range(0, genome.network.connections.Count)];
-        if (!conn.enabled) return;
+        NEATConnection connection =
+            genome.network.connections[
+                Random.Range(
+                    0,
+                    genome.network.connections.Count
+                )
+            ];
 
-        conn.enabled = false;
+        if (!connection.enabled)
+            return;
 
-        int newId = genome.network.nodes.Count;
-        NEATNode newNode = new NEATNode(newId, NEATNode.NodeType.Hidden);
+        connection.enabled = false;
+
+        int newId =
+            genome.network.nodes.Count;
+
+        NEATNode newNode =
+            new NEATNode(
+                newId,
+                NEATNode.NodeType.Hidden
+            );
+
         genome.network.nodes.Add(newNode);
 
-        genome.network.connections.Add(new NEATConnection(conn.fromNode, newNode, 1f));
-        genome.network.connections.Add(new NEATConnection(newNode, conn.toNode, conn.weight));
+        genome.network.connections.Add(
+            new NEATConnection(
+                connection.fromNode,
+                newNode,
+                1f
+            )
+        );
+
+        genome.network.connections.Add(
+            new NEATConnection(
+                newNode,
+                connection.toNode,
+                connection.weight
+            )
+        );
     }
 
-    private void SaveChampionGenome(Genome genome, int genNumber)
+    private void SaveChampionGenome(
+        Genome genome,
+        int genNumber)
     {
-        string filePath = Path.Combine(saveFolderPath, "gen_" + genNumber + ".json");
-        string json = JsonUtility.ToJson(genome, true);
-        File.WriteAllText(filePath, json);
+        string filePath =
+            Path.Combine(
+                saveFolderPath,
+                "gen_" + genNumber + ".json"
+            );
+
+        string json =
+            JsonUtility.ToJson(
+                genome,
+                true
+            );
+
+        File.WriteAllText(
+            filePath,
+            json
+        );
     }
 
-    private Genome LoadChampionGenome(int genNumber)
+    private Genome LoadChampionGenome(
+        int genNumber)
     {
-        string filePath = Path.Combine(saveFolderPath, "gen_" + genNumber + ".json");
+        string filePath =
+            Path.Combine(
+                saveFolderPath,
+                "gen_" + genNumber + ".json"
+            );
+
         if (File.Exists(filePath))
         {
-            string json = File.ReadAllText(filePath);
-            return JsonUtility.FromJson<Genome>(json);
+            string json =
+                File.ReadAllText(filePath);
+
+            return JsonUtility.FromJson<Genome>(
+                json
+            );
         }
+
         return null;
     }
 
     private int GetLatestGenerationNumber()
     {
-        if (!Directory.Exists(saveFolderPath)) return 0;
+        if (!Directory.Exists(saveFolderPath))
+            return 0;
 
-        string[] files = Directory.GetFiles(saveFolderPath, "gen_*.json");
+        string[] files =
+            Directory.GetFiles(
+                saveFolderPath,
+                "gen_*.json"
+            );
+
         int maxGen = 0;
 
         foreach (string file in files)
         {
-            string fileName = Path.GetFileNameWithoutExtension(file);
-            string numberPart = fileName.Replace("gen_", "");
-            if (int.TryParse(numberPart, out int gen))
+            string fileName =
+                Path.GetFileNameWithoutExtension(file);
+
+            string numberPart =
+                fileName.Replace(
+                    "gen_",
+                    ""
+                );
+
+            if (int.TryParse(
+                    numberPart,
+                    out int gen))
             {
-                if (gen > maxGen) maxGen = gen;
+                if (gen > maxGen)
+                {
+                    maxGen = gen;
+                }
             }
         }
 
@@ -405,49 +662,79 @@ public class EvolutionManager : MonoBehaviour
     private bool AllAgentsDead()
     {
         int count = 0;
-        foreach (AgentController a in activeAgents)
+
+        foreach (AgentController agent
+                 in activeAgents)
         {
-            if (a != null && a.gameObject.activeSelf) count++;
+            if (agent != null &&
+                agent.gameObject.activeSelf)
+            {
+                count++;
+            }
         }
+
         return count == 0;
     }
 
     public int GetAliveCount()
     {
         int count = 0;
-        foreach (AgentController a in activeAgents)
+
+        foreach (AgentController agent
+                 in activeAgents)
         {
-            if (a != null && a.gameObject.activeSelf) count++;
+            if (agent != null &&
+                agent.gameObject.activeSelf)
+            {
+                count++;
+            }
         }
+
         return count;
     }
 
     private void UpdateLeaderHighlight()
     {
-        if (activeAgents == null || activeAgents.Count == 0) return;
+        if (activeAgents == null ||
+            activeAgents.Count == 0)
+        {
+            return;
+        }
 
         AgentController currentLeader = null;
         float maxFitness = -1f;
 
-        for (int i = 0; i < activeAgents.Count; i++)
+        for (int i = 0;
+             i < activeAgents.Count;
+             i++)
         {
-            if (activeAgents[i] != null && activeAgents[i].gameObject.activeSelf)
+            if (activeAgents[i] != null &&
+                activeAgents[i].gameObject.activeSelf)
             {
-                float agentFitness = activeAgents[i].GetFitness();
+                float agentFitness =
+                    activeAgents[i].GetFitness();
+
                 if (agentFitness > maxFitness)
                 {
                     maxFitness = agentFitness;
-                    currentLeader = activeAgents[i];
+                    currentLeader =
+                        activeAgents[i];
                 }
             }
         }
 
-        for (int i = 0; i < activeAgents.Count; i++)
+        for (int i = 0;
+             i < activeAgents.Count;
+             i++)
         {
             if (activeAgents[i] != null)
             {
-                bool isLeader = (activeAgents[i] == currentLeader);
-                activeAgents[i].SetHighlight(isLeader);
+                bool isLeader =
+                    activeAgents[i] == currentLeader;
+
+                activeAgents[i].SetHighlight(
+                    isLeader
+                );
             }
         }
     }

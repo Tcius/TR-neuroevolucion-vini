@@ -577,7 +577,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::EvolutionManager
   populationSize: 25
-  generationDuration: 15
+  generationDuration: 30
+  tau: 90
   population: []
   activeAgents: []
   generationCount: 1

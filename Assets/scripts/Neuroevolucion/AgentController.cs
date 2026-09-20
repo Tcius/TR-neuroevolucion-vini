@@ -14,7 +14,7 @@ public class AgentController : MonoBehaviour
     private int newTilesVisited = 0;
     private bool diedFromStagnation = false;
 
-    private const float MaxTimeWithoutProgress = 3.5f;
+    private const float MaxTimeWithoutProgress = 5f;
     private const float StagnationPenalty = 100f;
 
     public EvolutionManager.Genome MyGenome
@@ -26,6 +26,7 @@ public class AgentController : MonoBehaviour
     {
         pacmanScript = GetComponent<Pacman>();
         myGenomePrivate = genome;
+
         timeAlive = 0f;
         individualScore = 0;
         isDead = false;
@@ -63,10 +64,13 @@ public class AgentController : MonoBehaviour
             return;
         }
 
-        float[] inputs = GetSensorInputs();
-        float[] outputs = myGenomePrivate.network.FeedForward(inputs, 4);
+        if (pacmanScript != null && pacmanScript.NeedsDecision)
+        {
+            float[] inputs = GetSensorInputs();
+            float[] outputs = myGenomePrivate.network.FeedForward(inputs, 4);
 
-        pacmanScript.ProcessOutputs(outputs);
+            pacmanScript.ProcessOutputs(outputs);
+        }
 
         UpdateFitness();
     }
@@ -117,7 +121,9 @@ public class AgentController : MonoBehaviour
 
         if (closestPellet != null)
         {
-            Vector2 diff = (closestPellet.transform.position - transform.position).normalized;
+            Vector2 diff =
+                (closestPellet.transform.position - transform.position).normalized;
+
             inputs[8] = diff.x;
             inputs[9] = diff.y;
         }
@@ -129,7 +135,9 @@ public class AgentController : MonoBehaviour
 
         if (closestPowerPellet != null)
         {
-            Vector2 diffPower = (closestPowerPellet.transform.position - transform.position).normalized;
+            Vector2 diffPower =
+                (closestPowerPellet.transform.position - transform.position).normalized;
+
             inputs[10] = diffPower.x;
             inputs[11] = diffPower.y;
         }
@@ -142,13 +150,18 @@ public class AgentController : MonoBehaviour
     private GameObject FindClosestWithTag(string tag)
     {
         GameObject[] targets = GameObject.FindGameObjectsWithTag(tag);
+
         GameObject closest = null;
         float minDistance = Mathf.Infinity;
         Vector3 currentPos = transform.position;
 
         foreach (GameObject target in targets)
         {
-            float distance = Vector3.Distance(target.transform.position, currentPos);
+            float distance = Vector3.Distance(
+                target.transform.position,
+                currentPos
+            );
+
             if (distance < minDistance && distance < 15f)
             {
                 closest = target;
@@ -163,8 +176,8 @@ public class AgentController : MonoBehaviour
     {
         myGenomePrivate.fitness =
             individualScore
-            + (newTilesVisited * 2f)
-            + (timeAlive)
+            + newTilesVisited
+            - (timeAlive * 3f) 
             - (diedFromStagnation ? StagnationPenalty : 0f);
     }
 
