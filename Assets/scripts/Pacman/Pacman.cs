@@ -11,6 +11,11 @@ public class Pacman : MonoBehaviour
     private Node currentNode;
     private bool waitingForDecision = false;
 
+    private const float ReverseCooldown = 5f;
+    private const float ReverseProgressDelay = 4f;
+    private const float ReverseOutputMargin = 0.15f;
+    private float reverseBlockedUntil = 0f;
+
     public bool NeedsDecision
     {
         get { return waitingForDecision && currentNode != null; }
@@ -38,6 +43,7 @@ public class Pacman : MonoBehaviour
 
         currentNode = null;
         waitingForDecision = false;
+        reverseBlockedUntil = 0f;
 
         gameObject.SetActive(true);
     }
@@ -94,6 +100,31 @@ public class Pacman : MonoBehaviour
             }
         }
 
+        float bestNonReverseOutput = float.MinValue;
+
+        for (int i = 0; i < 3; i++)
+        {
+            Vector2 targetDirection = possibleDirections[i];
+
+            if (currentNode.availableDirections.Contains(targetDirection) &&
+                outputs[i] > bestNonReverseOutput)
+            {
+                bestNonReverseOutput = outputs[i];
+            }
+        }
+
+        AgentController agentController = GetComponent<AgentController>();
+
+        float timeSinceLastPellet = agentController != null
+            ? agentController.GetTimeSinceLastPellet()
+            : float.MaxValue;
+
+        bool reverseAllowed =
+            !hasNonReverseOption ||
+            (Time.time >= reverseBlockedUntil &&
+             timeSinceLastPellet >= ReverseProgressDelay &&
+             outputs[3] >= bestNonReverseOutput + ReverseOutputMargin);
+
         int bestOutputIndex = -1;
         float bestOutputValue = float.MinValue;
 
@@ -106,7 +137,7 @@ public class Pacman : MonoBehaviour
                 continue;
             }
 
-            if (i == 3 && hasNonReverseOption)
+            if (i == 3 && !reverseAllowed)
             {
                 continue;
             }
@@ -121,6 +152,12 @@ public class Pacman : MonoBehaviour
         if (bestOutputIndex >= 0)
         {
             movement.SetDirection(possibleDirections[bestOutputIndex]);
+
+            if (bestOutputIndex == 3 && hasNonReverseOption)
+            {
+                reverseBlockedUntil =
+                    Time.time + ReverseCooldown;
+            }
         }
 
         waitingForDecision = false;

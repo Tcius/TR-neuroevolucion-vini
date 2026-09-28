@@ -10,12 +10,15 @@ public class UIManager : MonoBehaviour
     public TextMeshProUGUI currentGenFitnessText;
     public TextMeshProUGUI hiddenNodesText;
     public TextMeshProUGUI aliveAgentsText;
-
-    private float bestFitnessEver = 0f;
+    public TextMeshProUGUI completedAgentsText;
+    public TextMeshProUGUI pelletsRemainingText;
 
     private void Update()
     {
-        if (evolutionManager == null) return;
+        if (evolutionManager == null)
+        {
+            return;
+        }
 
         UpdateUI();
     }
@@ -24,82 +27,222 @@ public class UIManager : MonoBehaviour
     {
         if (timerText != null)
         {
-            float tiempoRestante = Mathf.Max(0f, evolutionManager.generationDuration - evolutionManager.timer);
-            timerText.text = "Tiempo: " + tiempoRestante.ToString("F1") + "s";
+            timerText.text =
+                "Tiempo: " +
+                evolutionManager.timer.ToString("F1") +
+                "s";
         }
 
         if (generationText != null)
         {
-            generationText.text = "Generacion: " + evolutionManager.generationCount;
+            generationText.text =
+                "Generacion: " +
+                evolutionManager.generationCount;
         }
 
         if (bestFitnessText != null)
         {
-            float currentBest = GetCurrentBestFitness();
-            if (currentBest > bestFitnessEver)
-            {
-                bestFitnessEver = currentBest;
-            }
-            bestFitnessText.text = "Max Fitness Historico: " + bestFitnessEver.ToString("F1");
+            bestFitnessText.text =
+                "Max Fitness Historico: " +
+                evolutionManager
+                    .GetHistoricalBestFitness()
+                    .ToString("F1");
         }
 
         if (currentGenFitnessText != null)
         {
-            float genMax = evolutionManager.GetCurrentGenerationMaxFitness();
-            currentGenFitnessText.text = "Max Fitness Actual: " + genMax.ToString("F1");
+            currentGenFitnessText.text =
+                "Max Fitness Actual: " +
+                evolutionManager
+                    .GetCurrentGenerationMaxFitness()
+                    .ToString("F1");
         }
 
-        if (hiddenNodesText != null && evolutionManager.population != null && evolutionManager.population.Count > 0)
+        if (hiddenNodesText != null)
         {
-            int hiddenCount = CountHiddenNodesOfBestGenome();
-            hiddenNodesText.text = "Neuronas Ocultas (Lider): " + hiddenCount;
+            int leaderHidden =
+                CountHiddenNodesOfBestGenome();
+
+            int maxHidden =
+                CountMaximumHiddenNodesInPopulation();
+
+            hiddenNodesText.text =
+                "Neuronas Ocultas (Lider): " +
+                leaderHidden +
+                " | Max Poblacion: " +
+                maxHidden;
         }
 
         if (aliveAgentsText != null)
         {
-            aliveAgentsText.text = "Vivos: " + evolutionManager.GetAliveCount() + " / " + evolutionManager.populationSize;
+            aliveAgentsText.text =
+                "Vivos: " +
+                evolutionManager.GetAliveCount() +
+                " / " +
+                evolutionManager.populationSize;
+        }
+
+        if (completedAgentsText != null)
+        {
+            completedAgentsText.text =
+                "Completados: " +
+                evolutionManager.GetCurrentCompletedCount() +
+                " / " +
+                evolutionManager.populationSize;
+        }
+
+        if (pelletsRemainingText != null)
+        {
+            AgentController leader =
+                GetBestAgent();
+
+            string remaining =
+                leader != null
+                    ? leader.GetRemainingPellets().ToString()
+                    : "-";
+
+            pelletsRemainingText.text =
+                "Bolitas Faltantes Lider: " +
+                remaining;
         }
     }
 
-    private float GetCurrentBestFitness()
+    private AgentController GetBestAgent()
     {
-        if (evolutionManager.population == null || evolutionManager.population.Count == 0) return 0f;
-
-        float max = 0f;
-        for (int i = 0; i < evolutionManager.population.Count; i++)
+        if (evolutionManager.activeAgents == null ||
+            evolutionManager.activeAgents.Count == 0)
         {
-            if (evolutionManager.population[i].fitness > max)
+            return null;
+        }
+
+        AgentController best = null;
+        float bestFitness = float.MinValue;
+
+        for (int i = 0;
+             i < evolutionManager.activeAgents.Count;
+             i++)
+        {
+            AgentController agent =
+                evolutionManager.activeAgents[i];
+
+            if (agent == null)
             {
-                max = evolutionManager.population[i].fitness;
+                continue;
+            }
+
+            float fitness =
+                agent.GetFitness();
+
+            if (best == null ||
+                fitness > bestFitness)
+            {
+                best = agent;
+                bestFitness = fitness;
             }
         }
-        return max;
+
+        return best;
+    }
+
+    private EvolutionManager.Genome GetBestGenome()
+    {
+        if (evolutionManager.population == null ||
+            evolutionManager.population.Count == 0)
+        {
+            return null;
+        }
+
+        EvolutionManager.Genome best =
+            evolutionManager.population[0];
+
+        for (int i = 1;
+             i < evolutionManager.population.Count;
+             i++)
+        {
+            if (evolutionManager.population[i].fitness >
+                best.fitness)
+            {
+                best =
+                    evolutionManager.population[i];
+            }
+        }
+
+        return best;
     }
 
     private int CountHiddenNodesOfBestGenome()
     {
-        if (evolutionManager.population == null || evolutionManager.population.Count == 0) return 0;
+        EvolutionManager.Genome bestGenome =
+            GetBestGenome();
 
-        EvolutionManager.Genome bestGenome = evolutionManager.population[0];
-        float maxFitness = -1f;
-
-        for (int i = 0; i < evolutionManager.population.Count; i++)
+        if (bestGenome == null ||
+            bestGenome.network == null ||
+            bestGenome.network.nodes == null)
         {
-            if (evolutionManager.population[i].fitness > maxFitness)
-            {
-                maxFitness = evolutionManager.population[i].fitness;
-                bestGenome = evolutionManager.population[i];
-            }
+            return 0;
         }
 
         int hidden = 0;
-        for (int i = 0; i < bestGenome.network.nodes.Count; i++)
+
+        for (int i = 0;
+             i < bestGenome.network.nodes.Count;
+             i++)
         {
-            if (bestGenome.network.nodes[i].type == EvolutionManager.NEATNode.NodeType.Hidden)
+            if (bestGenome.network.nodes[i] != null &&
+                bestGenome.network.nodes[i].type ==
+                EvolutionManager.NEATNode.NodeType.Hidden)
             {
                 hidden++;
             }
         }
+
         return hidden;
+    }
+
+    private int CountMaximumHiddenNodesInPopulation()
+    {
+        if (evolutionManager.population == null ||
+            evolutionManager.population.Count == 0)
+        {
+            return 0;
+        }
+
+        int maxHidden = 0;
+
+        for (int i = 0;
+             i < evolutionManager.population.Count;
+             i++)
+        {
+            EvolutionManager.Genome genome =
+                evolutionManager.population[i];
+
+            if (genome == null ||
+                genome.network == null ||
+                genome.network.nodes == null)
+            {
+                continue;
+            }
+
+            int hidden = 0;
+
+            for (int j = 0;
+                 j < genome.network.nodes.Count;
+                 j++)
+            {
+                if (genome.network.nodes[j] != null &&
+                    genome.network.nodes[j].type ==
+                    EvolutionManager.NEATNode.NodeType.Hidden)
+                {
+                    hidden++;
+                }
+            }
+
+            if (hidden > maxHidden)
+            {
+                maxHidden = hidden;
+            }
+        }
+
+        return maxHidden;
     }
 }

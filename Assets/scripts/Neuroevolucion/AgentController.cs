@@ -4,32 +4,42 @@ using UnityEngine;
 public class AgentController : MonoBehaviour
 {
     private Pacman pacmanScript;
+    private GameManager gameManager;
     private EvolutionManager.Genome myGenomePrivate;
     private float timeAlive = 0f;
     private int individualScore = 0;
     private bool isDead = false;
+    private bool completedMaze = false;
 
     private HashSet<Vector2Int> visitedTiles = new HashSet<Vector2Int>();
     private float timeSinceLastProgress = 0f;
+    private float timeSinceLastPellet = 0f;
     private int newTilesVisited = 0;
     private bool diedFromStagnation = false;
 
-    private const float MaxTimeWithoutProgress = 5f;
+    private const float MaxTimeWithoutProgress = 15f;
     private const float StagnationPenalty = 100f;
+    private const float CompletionReward = 5000f;
 
     public EvolutionManager.Genome MyGenome
     {
         get { return myGenomePrivate; }
     }
 
+    public bool HasCompletedMaze
+    {
+        get { return completedMaze; }
+    }
+
     public void Setup(EvolutionManager.Genome genome)
     {
         pacmanScript = GetComponent<Pacman>();
+        gameManager = GetComponentInParent<GameManager>();
         myGenomePrivate = genome;
-
         timeAlive = 0f;
         individualScore = 0;
         isDead = false;
+        completedMaze = false;
         diedFromStagnation = false;
 
         visitedTiles.Clear();
@@ -38,6 +48,7 @@ public class AgentController : MonoBehaviour
         visitedTiles.Add(startingTile);
 
         timeSinceLastProgress = 0f;
+        timeSinceLastPellet = 0f;
         newTilesVisited = 0;
     }
 
@@ -47,6 +58,7 @@ public class AgentController : MonoBehaviour
 
         timeAlive += Time.deltaTime;
         timeSinceLastProgress += Time.deltaTime;
+        timeSinceLastPellet += Time.deltaTime;
 
         Vector2Int currentTile = GetCurrentTile();
 
@@ -67,7 +79,8 @@ public class AgentController : MonoBehaviour
         if (pacmanScript != null && pacmanScript.NeedsDecision)
         {
             float[] inputs = GetSensorInputs();
-            float[] outputs = myGenomePrivate.network.FeedForward(inputs, 4);
+            float[] outputs =
+                myGenomePrivate.network.FeedForward(inputs, 4);
 
             pacmanScript.ProcessOutputs(outputs);
         }
@@ -87,21 +100,25 @@ public class AgentController : MonoBehaviour
             Vector2.right
         };
 
-        LayerMask obstacleMask = LayerMask.GetMask("Obstacle");
+        LayerMask obstacleMask =
+            LayerMask.GetMask("Obstacle");
+
         float maxDistance = 10f;
 
         for (int i = 0; i < 4; i++)
         {
-            RaycastHit2D hit = Physics2D.Raycast(
-                transform.position,
-                directions[i],
-                maxDistance,
-                obstacleMask
-            );
+            RaycastHit2D hit =
+                Physics2D.Raycast(
+                    transform.position,
+                    directions[i],
+                    maxDistance,
+                    obstacleMask
+                );
 
             if (hit.collider != null)
             {
-                inputs[i] = hit.distance / maxDistance;
+                inputs[i] =
+                    hit.distance / maxDistance;
             }
             else
             {
@@ -117,12 +134,16 @@ public class AgentController : MonoBehaviour
         inputs[8] = 0f;
         inputs[9] = 0f;
 
-        GameObject closestPellet = FindClosestWithTag("Pellet");
+        GameObject closestPellet =
+            FindClosestWithTag("Pellet");
 
         if (closestPellet != null)
         {
             Vector2 diff =
-                (closestPellet.transform.position - transform.position).normalized;
+                (
+                    closestPellet.transform.position -
+                    transform.position
+                ).normalized;
 
             inputs[8] = diff.x;
             inputs[9] = diff.y;
@@ -131,12 +152,16 @@ public class AgentController : MonoBehaviour
         inputs[10] = 0f;
         inputs[11] = 0f;
 
-        GameObject closestPowerPellet = FindClosestWithTag("PowerPellet");
+        GameObject closestPowerPellet =
+            FindClosestWithTag("PowerPellet");
 
         if (closestPowerPellet != null)
         {
             Vector2 diffPower =
-                (closestPowerPellet.transform.position - transform.position).normalized;
+                (
+                    closestPowerPellet.transform.position -
+                    transform.position
+                ).normalized;
 
             inputs[10] = diffPower.x;
             inputs[11] = diffPower.y;
@@ -149,22 +174,42 @@ public class AgentController : MonoBehaviour
 
     private GameObject FindClosestWithTag(string tag)
     {
-        GameObject[] targets = GameObject.FindGameObjectsWithTag(tag);
+        if (gameManager == null)
+        {
+            gameManager = GetComponentInParent<GameManager>();
+        }
+
+        if (gameManager == null ||
+            gameManager.pellets == null)
+        {
+            return null;
+        }
 
         GameObject closest = null;
         float minDistance = Mathf.Infinity;
-        Vector3 currentPos = transform.position;
 
-        foreach (GameObject target in targets)
+        Vector3 currentPos =
+            transform.position;
+
+        foreach (Transform pellet in gameManager.pellets)
         {
-            float distance = Vector3.Distance(
-                target.transform.position,
-                currentPos
-            );
-
-            if (distance < minDistance && distance < 15f)
+            if (pellet == null ||
+                !pellet.gameObject.activeInHierarchy ||
+                !pellet.CompareTag(tag))
             {
-                closest = target;
+                continue;
+            }
+
+            float distance =
+                Vector3.Distance(
+                    pellet.position,
+                    currentPos
+                );
+
+            if (distance < minDistance &&
+                distance < 15f)
+            {
+                closest = pellet.gameObject;
                 minDistance = distance;
             }
         }
@@ -176,9 +221,20 @@ public class AgentController : MonoBehaviour
     {
         myGenomePrivate.fitness =
             individualScore
-            + newTilesVisited
-            - (timeAlive * 3f) 
+            + (newTilesVisited * 2f)
+            + (completedMaze ? CompletionReward : 0f)
             - (diedFromStagnation ? StagnationPenalty : 0f);
+    }
+
+    public void CompleteMaze()
+    {
+        if (isDead) return;
+
+        completedMaze = true;
+        diedFromStagnation = false;
+        Debug.Log("Maze completed by agent: " + FindAnyObjectByType<EvolutionManager>().generationCount);
+        UpdateFitness();
+        Die();
     }
 
     private Vector2Int GetCurrentTile()
@@ -197,12 +253,14 @@ public class AgentController : MonoBehaviour
         {
             individualScore += 10;
             timeSinceLastProgress = 0f;
+            timeSinceLastPellet = 0f;
             other.gameObject.SetActive(false);
         }
         else if (other.CompareTag("PowerPellet"))
         {
             individualScore += 50;
             timeSinceLastProgress = 0f;
+            timeSinceLastPellet = 0f;
             other.gameObject.SetActive(false);
         }
     }
@@ -218,25 +276,64 @@ public class AgentController : MonoBehaviour
 
     public float GetFitness()
     {
-        return myGenomePrivate != null ? myGenomePrivate.fitness : 0f;
+        return myGenomePrivate != null
+            ? myGenomePrivate.fitness
+            : 0f;
     }
 
+    public float GetTimeSinceLastPellet()
+    {
+        return timeSinceLastPellet;
+    }
+
+
+    public int GetRemainingPellets()
+    {
+        if (gameManager == null)
+        {
+            gameManager = GetComponentInParent<GameManager>();
+        }
+
+        if (gameManager == null ||
+            gameManager.pellets == null)
+        {
+            return 0;
+        }
+
+        int remaining = 0;
+
+        foreach (Transform pellet in gameManager.pellets)
+        {
+            if (pellet != null &&
+                pellet.gameObject.activeSelf)
+            {
+                remaining++;
+            }
+        }
+
+        return remaining;
+    }
     public void SetHighlight(bool isLeader)
     {
-        SpriteRenderer sprite = GetComponent<SpriteRenderer>();
+        SpriteRenderer sprite =
+            GetComponent<SpriteRenderer>();
 
         if (sprite == null)
-            sprite = GetComponentInChildren<SpriteRenderer>();
+        {
+            sprite =
+                GetComponentInChildren<SpriteRenderer>();
+        }
 
         if (sprite != null)
         {
-            if (isLeader)
-                sprite.color = Color.darkRed;
-            else
-                sprite.color = Color.yellow;
+            sprite.color =
+                isLeader
+                    ? Color.red
+                    : Color.yellow;
         }
 
-        transform.localScale = Vector3.one;
+        transform.localScale =
+            Vector3.one;
     }
 
     public float[] GetSensorInputsForVisualizer()
