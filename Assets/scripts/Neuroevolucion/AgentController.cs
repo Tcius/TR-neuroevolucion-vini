@@ -13,13 +13,14 @@ public class AgentController : MonoBehaviour
 
     private HashSet<Vector2Int> visitedTiles = new HashSet<Vector2Int>();
     private float timeSinceLastProgress = 0f;
-    private float timeSinceLastPellet = 0f;
     private int newTilesVisited = 0;
     private bool diedFromStagnation = false;
 
     private const float MaxTimeWithoutProgress = 15f;
     private const float StagnationPenalty = 100f;
     private const float CompletionReward = 5000f;
+
+    public int ghostsEatenScore = 0;
 
     public EvolutionManager.Genome MyGenome
     {
@@ -38,6 +39,7 @@ public class AgentController : MonoBehaviour
         myGenomePrivate = genome;
         timeAlive = 0f;
         individualScore = 0;
+        ghostsEatenScore = 0;
         isDead = false;
         completedMaze = false;
         diedFromStagnation = false;
@@ -48,7 +50,6 @@ public class AgentController : MonoBehaviour
         visitedTiles.Add(startingTile);
 
         timeSinceLastProgress = 0f;
-        timeSinceLastPellet = 0f;
         newTilesVisited = 0;
     }
 
@@ -58,7 +59,6 @@ public class AgentController : MonoBehaviour
 
         timeAlive += Time.deltaTime;
         timeSinceLastProgress += Time.deltaTime;
-        timeSinceLastPellet += Time.deltaTime;
 
         Vector2Int currentTile = GetCurrentTile();
 
@@ -90,7 +90,7 @@ public class AgentController : MonoBehaviour
 
     private float[] GetSensorInputs()
     {
-        float[] inputs = new float[13];
+        float[] inputs = new float[14];
 
         Vector2[] directions =
         {
@@ -169,6 +169,18 @@ public class AgentController : MonoBehaviour
 
         inputs[12] = 0f;
 
+        Vector2 currentDirection = pacmanScript != null
+            ? pacmanScript.GetComponent<Movement>().direction
+            : Vector2.zero;
+
+        if (currentDirection == Vector2.zero && pacmanScript != null)
+        {
+            currentDirection = pacmanScript.GetComponent<Movement>().initialDirection;
+        }
+
+        float angle = Mathf.Atan2(currentDirection.y, currentDirection.x);
+        inputs[13] = angle / Mathf.PI;
+
         return inputs;
     }
 
@@ -223,6 +235,7 @@ public class AgentController : MonoBehaviour
             individualScore
             + (newTilesVisited * 2f)
             + (completedMaze ? CompletionReward : 0f)
+            + ghostsEatenScore
             - (diedFromStagnation ? StagnationPenalty : 0f);
     }
 
@@ -245,24 +258,12 @@ public class AgentController : MonoBehaviour
         );
     }
 
-    private void OnTriggerEnter2D(Collider2D other)
+    public void RegisterPelletEaten(int points)
     {
         if (isDead) return;
 
-        if (other.CompareTag("Pellet"))
-        {
-            individualScore += 10;
-            timeSinceLastProgress = 0f;
-            timeSinceLastPellet = 0f;
-            other.gameObject.SetActive(false);
-        }
-        else if (other.CompareTag("PowerPellet"))
-        {
-            individualScore += 50;
-            timeSinceLastProgress = 0f;
-            timeSinceLastPellet = 0f;
-            other.gameObject.SetActive(false);
-        }
+        individualScore += points;
+        timeSinceLastProgress = 0f;
     }
 
     public void Die()
@@ -279,11 +280,6 @@ public class AgentController : MonoBehaviour
         return myGenomePrivate != null
             ? myGenomePrivate.fitness
             : 0f;
-    }
-
-    public float GetTimeSinceLastPellet()
-    {
-        return timeSinceLastPellet;
     }
 
 

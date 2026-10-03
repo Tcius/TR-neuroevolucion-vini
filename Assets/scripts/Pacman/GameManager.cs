@@ -33,7 +33,9 @@ public class GameManager : MonoBehaviour
     private void ResetState()
     {
         resetghostmultiplier();
-
+        for (int i = 0; i < ghosts.Length; i++) {
+            ghosts[i].ResetState();
+        }
         this.pacman.gameObject.SetActive(true);
         pacman.ResetState();
     }
@@ -52,6 +54,7 @@ public class GameManager : MonoBehaviour
         );
 
         this.ghostMultiplier++;
+        pacman.GetComponent<AgentController>().ghostsEatenScore += 300;
     }
 
     public void PacmanEaten()
@@ -68,11 +71,18 @@ public class GameManager : MonoBehaviour
             pellet.points
         );
 
+        AgentController agent =
+            pacman.GetComponent<AgentController>();
+
+        if (agent != null)
+        {
+            agent.RegisterPelletEaten(
+                pellet.points
+            );
+        }
+
         if (!HasremainingPellets())
         {
-            AgentController agent =
-                pacman.GetComponent<AgentController>();
-
             if (agent != null)
             {
                 agent.CompleteMaze();
@@ -87,6 +97,10 @@ public class GameManager : MonoBehaviour
     public void powerPelletEaten(
         PowerPellet pellet)
     {
+        for(int i = 0; i<this.ghosts.Length; i++)
+        {
+            this.ghosts[i].frightened.Enable(pellet.duration);
+        }
         pelletEaten(pellet);
 
         CancelInvoke();

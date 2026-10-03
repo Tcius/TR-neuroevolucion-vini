@@ -8,7 +8,7 @@ public class PacmanSensors : MonoBehaviour
 
     public float[] GetInputs(Transform closestPellet, Transform closestBigPellet, bool ghostsAreScared)
     {
-        float[] inputs = new float[13];
+        float[] inputs = new float[14];
 
         inputs[0] = CheckLayerDistance(Vector2.up, wallLayer);
         inputs[1] = CheckLayerDistance(Vector2.down, wallLayer);
@@ -45,6 +45,17 @@ public class PacmanSensors : MonoBehaviour
         }
 
         inputs[12] = ghostsAreScared ? 1f : 0f;
+
+        Movement movement = GetComponent<Movement>();
+        Vector2 currentDirection = movement != null ? movement.direction : Vector2.zero;
+
+        if (currentDirection == Vector2.zero && movement != null)
+        {
+            currentDirection = movement.initialDirection;
+        }
+
+        float angle = Mathf.Atan2(currentDirection.y, currentDirection.x);
+        inputs[13] = angle / Mathf.PI;
 
         return inputs;
     }

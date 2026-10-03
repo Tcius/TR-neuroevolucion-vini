@@ -1740,7 +1740,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 1, y: 0.5}
   m_AnchorMax: {x: 1, y: 0.5}
-  m_AnchoredPosition: {x: -88.78993, y: -70.7}
+  m_AnchoredPosition: {x: -88.78993, y: -86.8}
   m_SizeDelta: {x: 177.5802, y: 50}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!1 &1660642376
@@ -1909,7 +1909,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1fc9571465f68744b83b7c2c0d643064, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PopulationSpawner
-  mazePrefab: {fileID: 5990733772846994621, guid: ef4315967fc159c488d53b85896f7d04, type: 3}
+  mazePrefab: {fileID: 2617954017237860567, guid: e33f385c106d8d24a95d7dfd6c2ef783, type: 3}
   totalPopulation: 45
   columns: 9
   spacingX: 60

@@ -40,12 +40,19 @@ public class EvolutionManager : MonoBehaviour
         "Genomes_NEAT_Phase1_Completion_Continue";
 
     private const string PrimarySourceSaveFolderName =
-        "Genomes_NEAT_v2";
+        "Genomes_NEAT_Phase1_Completion_Continue";
 
     private const string SecondarySourceSaveFolderName =
         "Genomes_NEAT_Phase1_Completion";
 
-    private const int ResumeFromGeneration = 300;
+    private const int RollbackGeneration = 450;
+    private const int ExistingInputCount = 13;
+    private const int DirectionInputNodeId = 1000000;
+    private const int OutputStartNodeId = 13;
+    private const int OutputCount = 4;
+
+    private const string RollbackMarkerFileName =
+        "rollback_450_initialized.json";
 
     private const string HistoricalBestFileName =
         "historical_best.json";
@@ -55,7 +62,7 @@ public class EvolutionManager : MonoBehaviour
 
     private readonly Dictionary<string, int>
         innovationHistory =
-        new Dictionary<string, int>();
+            new Dictionary<string, int>();
 
     private int nextInnovationNumber = 1;
     private int lastSpeciesCount = 0;
@@ -298,14 +305,6 @@ public class EvolutionManager : MonoBehaviour
                 SaveFolderName
             );
 
-        if (!Directory.Exists(
-                saveFolderPath))
-        {
-            Directory.CreateDirectory(
-                saveFolderPath
-            );
-        }
-
         LoadHistoricalBestFitness();
     }
 
@@ -538,60 +537,108 @@ public class EvolutionManager : MonoBehaviour
         population =
             new List<Genome>();
 
-        int latestSavedGeneration =
-            GetLatestGenerationNumber();
-
-        if (latestSavedGeneration > 0)
+        if (!Directory.Exists(saveFolderPath))
         {
-            List<Genome> savedTop =
-                LoadTopGenomes(
-                    latestSavedGeneration
+            generationCount = 1;
+
+            for (int i = 0;
+                 i < populationSize;
+                 i++)
+            {
+                population.Add(
+                    CreateInitialGenome()
+                );
+            }
+
+            return;
+        }
+
+        string rollbackMarkerPath =
+            Path.Combine(
+                saveFolderPath,
+                RollbackMarkerFileName
+            );
+
+        bool rollbackInitialized =
+            File.Exists(rollbackMarkerPath);
+
+        if (!rollbackInitialized)
+        {
+            List<Genome> rollbackTop =
+                LoadTopGenomesFromFolder(
+                    SaveFolderName,
+                    RollbackGeneration
                 );
 
-            if (savedTop != null &&
-                savedTop.Count > 0)
+            if (rollbackTop == null ||
+                rollbackTop.Count == 0)
             {
-                LoadPopulationFromSavedTop(
-                    savedTop,
-                    latestSavedGeneration
+                rollbackTop =
+                    LoadTopGenomesFromFolder(
+                        PrimarySourceSaveFolderName,
+                        RollbackGeneration
+                    );
+            }
+
+            if (rollbackTop == null ||
+                rollbackTop.Count == 0)
+            {
+                rollbackTop =
+                    LoadTopGenomesFromFolder(
+                        SecondarySourceSaveFolderName,
+                        RollbackGeneration
+                    );
+            }
+
+            if (rollbackTop != null &&
+                rollbackTop.Count > 0)
+            {
+                RemoveGenerationsAfterRollback();
+
+                BuildPopulationFromSavedTop(
+                    rollbackTop,
+                    true
                 );
+
+                GenerationSave marker =
+                    new GenerationSave();
+
+                marker.generation =
+                    RollbackGeneration;
+
+                File.WriteAllText(
+                    rollbackMarkerPath,
+                    JsonUtility.ToJson(marker, true)
+                );
+
+                generationCount =
+                    RollbackGeneration + 1;
 
                 return;
             }
         }
 
-        List<Genome> resumeTop =
-            LoadTopGenomesFromSource(
-                PrimarySourceSaveFolderName,
-                ResumeFromGeneration
-            );
+        int latestGen =
+            GetLatestGenerationNumber();
 
-        if (resumeTop == null ||
-            resumeTop.Count == 0)
+        if (latestGen > 0)
         {
-            resumeTop =
-                LoadTopGenomesFromSource(
-                    SecondarySourceSaveFolderName,
-                    ResumeFromGeneration
-                );
-        }
+            List<Genome> savedTop =
+                LoadTopGenomes(latestGen);
 
-        if (resumeTop != null &&
-            resumeTop.Count > 0)
-        {
-            population =
-                CreateResumePopulation(
-                    resumeTop
+            if (savedTop != null &&
+                savedTop.Count > 0)
+            {
+                BuildPopulationFromSavedTop(
+                    savedTop,
+                    false
                 );
 
-            RegisterExistingInnovations(
-                population
-            );
+                generationCount =
+                    latestGen + 1;
 
-            generationCount =
-                ResumeFromGeneration + 1;
-
-            return;
+                return;
+            }
         }
 
         generationCount = 1;
@@ -606,9 +653,9 @@ public class EvolutionManager : MonoBehaviour
         }
     }
 
-    private void LoadPopulationFromSavedTop(
+    private void BuildPopulationFromSavedTop(
         List<Genome> savedTop,
-        int savedGeneration)
+        bool resetFitness)
     {
         for (int i = 0;
              i < savedTop.Count &&
@@ -619,43 +666,41 @@ public class EvolutionManager : MonoBehaviour
                 savedTop[i].network
             );
 
-            population.Add(
+            Genome clone =
                 CloneGenome(
                     savedTop[i]
-                )
-            );
+                );
+
+            if (resetFitness)
+            {
+                clone.fitness = 0f;
+            }
+
+            population.Add(clone);
         }
 
         RegisterExistingInnovations(
             population
         );
 
-        while (population.Count <
-               populationSize)
+        while (population.Count < populationSize)
         {
             Genome parentA =
                 SelectParentByTournament(
                     population,
-                    Mathf.Max(
-                        2,
-                        tournamentSize
-                    )
+                    Mathf.Max(2, tournamentSize)
                 );
 
             Genome parentB =
                 SelectParentByTournament(
                     population,
-                    Mathf.Max(
-                        2,
-                        tournamentSize
-                    )
+                    Mathf.Max(2, tournamentSize)
                 );
 
             Genome child;
 
-            if (Random.value <
-                    crossoverRate &&
-                population.Count > 1)
+            if (population.Count > 1 &&
+                Random.value < crossoverRate)
             {
                 child =
                     Crossover(
@@ -666,108 +711,63 @@ public class EvolutionManager : MonoBehaviour
             else
             {
                 child =
-                    CloneGenome(
-                        parentA
-                    );
+                    CloneGenome(parentA);
             }
 
             Mutate(child);
+            child.fitness = 0f;
             population.Add(child);
         }
 
-        generationCount =
-            savedGeneration + 1;
+        if (resetFitness)
+        {
+            for (int i = 0;
+                 i < population.Count;
+                 i++)
+            {
+                population[i].fitness = 0f;
+            }
+        }
     }
 
-    private List<Genome> CreateResumePopulation(
-        List<Genome> savedTop)
+    private void RemoveGenerationsAfterRollback()
     {
-        List<Genome> result =
-            new List<Genome>();
-
-        int seedCount =
-            Mathf.Min(
-                savedTop.Count,
-                populationSize
+        string[] files =
+            Directory.GetFiles(
+                saveFolderPath,
+                "gen_*_top10.json"
             );
 
         for (int i = 0;
-             i < seedCount;
+             i < files.Length;
              i++)
         {
-            Genome seed =
-                CloneGenome(
-                    savedTop[i]
+            string fileName =
+                Path.GetFileNameWithoutExtension(
+                    files[i]
                 );
 
-            seed.fitness = 0f;
+            if (!fileName.StartsWith("gen_") ||
+                !fileName.EndsWith("_top10"))
+            {
+                continue;
+            }
 
-            result.Add(seed);
-        }
-
-        int sourceIndex = 0;
-
-        while (result.Count <
-               populationSize)
-        {
-            Genome child =
-                CloneGenome(
-                    savedTop[
-                        sourceIndex %
-                        savedTop.Count
-                    ]
+            string numberPart =
+                fileName.Substring(
+                    4,
+                    fileName.Length - 10
                 );
 
-            child.fitness = 0f;
-
-            Mutate(child);
-
-            result.Add(child);
-
-            sourceIndex++;
+            if (int.TryParse(
+                    numberPart,
+                    out int generation
+                ) &&
+                generation > RollbackGeneration)
+            {
+                File.Delete(files[i]);
+            }
         }
-
-        return result;
-    }
-
-    private List<Genome> LoadTopGenomesFromSource(
-        string folderName,
-        int generation)
-    {
-        string sourceFolderPath =
-            Path.Combine(
-                Application.persistentDataPath,
-                folderName
-            );
-
-        string filePath =
-            Path.Combine(
-                sourceFolderPath,
-                "gen_" +
-                generation.ToString("D5") +
-                "_top10.json"
-            );
-
-        if (!File.Exists(filePath))
-        {
-            return null;
-        }
-
-        string json =
-            File.ReadAllText(filePath);
-
-        GenerationSave save =
-            JsonUtility.FromJson<GenerationSave>(
-                json
-            );
-
-        if (save == null ||
-            save.genomes == null)
-        {
-            return null;
-        }
-
-        return save.genomes;
     }
 
     private Genome CreateInitialGenome()
@@ -776,7 +776,7 @@ public class EvolutionManager : MonoBehaviour
             new NeuralNetwork();
 
         for (int i = 0;
-             i < 13;
+             i < ExistingInputCount;
              i++)
         {
             network.nodes.Add(
@@ -788,13 +788,21 @@ public class EvolutionManager : MonoBehaviour
             );
         }
 
+        network.nodes.Add(
+            new NEATNode(
+                DirectionInputNodeId,
+                NEATNode.NodeType.Input,
+                0f
+            )
+        );
+
         for (int i = 0;
-             i < 4;
+             i < OutputCount;
              i++)
         {
             network.nodes.Add(
                 new NEATNode(
-                    13 + i,
+                    OutputStartNodeId + i,
                     NEATNode.NodeType.Output,
                     10f
                 )
@@ -802,25 +810,26 @@ public class EvolutionManager : MonoBehaviour
         }
 
         for (int input = 0;
-             input < 13;
+             input < ExistingInputCount;
              input++)
         {
             for (int output = 0;
-                 output < 4;
+                 output < OutputCount;
                  output++)
             {
+                int outputId =
+                    OutputStartNodeId + output;
+
                 int innovation =
                     GetOrCreateInnovation(
                         input,
-                        13 + output
+                        outputId
                     );
 
                 network.connections.Add(
                     new NEATConnection(
-                        network.nodes[input],
-                        network.nodes[
-                            13 + output
-                        ],
+                        FindNodeById(network, input),
+                        FindNodeById(network, outputId),
                         Random.Range(
                             -1f,
                             1f
@@ -831,9 +840,9 @@ public class EvolutionManager : MonoBehaviour
             }
         }
 
-        return new Genome(
-            network
-        );
+        EnsureDirectionInputConnections(network);
+
+        return new Genome(network);
     }
 
     private void StartGeneration()
@@ -976,9 +985,7 @@ public class EvolutionManager : MonoBehaviour
 
             Mutate(child);
 
-            newPopulation.Add(
-                child
-            );
+            newPopulation.Add(child);
         }
 
         population =
@@ -1445,7 +1452,7 @@ public class EvolutionManager : MonoBehaviour
         Dictionary<int, NEATNode> nodeMap)
     {
         for (int i = 0;
-             i < 13;
+             i < ExistingInputCount;
              i++)
         {
             if (!nodeMap.ContainsKey(i))
@@ -1468,12 +1475,31 @@ public class EvolutionManager : MonoBehaviour
             }
         }
 
+        if (!nodeMap.ContainsKey(DirectionInputNodeId))
+        {
+            NEATNode node =
+                new NEATNode(
+                    DirectionInputNodeId,
+                    NEATNode.NodeType.Input,
+                    0f
+                );
+
+            nodeMap.Add(
+                DirectionInputNodeId,
+                node
+            );
+
+            network.nodes.Add(
+                node
+            );
+        }
+
         for (int i = 0;
-             i < 4;
+             i < OutputCount;
              i++)
         {
             int id =
-                13 + i;
+                OutputStartNodeId + i;
 
             if (!nodeMap.ContainsKey(id))
             {
@@ -1494,6 +1520,40 @@ public class EvolutionManager : MonoBehaviour
                 );
             }
         }
+    }
+
+    private Genome GetBestGenome()
+    {
+        return GetBestGenome(
+            population
+        );
+    }
+
+    private Genome GetBestGenome(
+        List<Genome> genomes)
+    {
+        if (genomes == null ||
+            genomes.Count == 0)
+        {
+            return null;
+        }
+
+        Genome best =
+            genomes[0];
+
+        for (int i = 1;
+             i < genomes.Count;
+             i++)
+        {
+            if (genomes[i].fitness >
+                best.fitness)
+            {
+                best =
+                    genomes[i];
+            }
+        }
+
+        return best;
     }
 
     private Genome CloneGenome(
@@ -1758,7 +1818,8 @@ public class EvolutionManager : MonoBehaviour
             if (ConnectionExists(
                     genome,
                     from.id,
-                    to.id))
+                    to.id
+                ))
             {
                 continue;
             }
@@ -1852,7 +1913,8 @@ public class EvolutionManager : MonoBehaviour
 
         if (FindNodeById(
                 genome.network,
-                newNodeId) != null)
+                newNodeId
+            ) != null)
         {
             return;
         }
@@ -1860,8 +1922,10 @@ public class EvolutionManager : MonoBehaviour
         selected.enabled = false;
 
         float newLayer =
-            (selected.fromNode.layer +
-             selected.toNode.layer) *
+            (
+                selected.fromNode.layer +
+                selected.toNode.layer
+            ) *
             0.5f;
 
         NEATNode newNode =
@@ -1911,12 +1975,35 @@ public class EvolutionManager : MonoBehaviour
         int fromId,
         int toId)
     {
+        if (genome == null)
+        {
+            return false;
+        }
+
+        return ConnectionExists(
+            genome.network,
+            fromId,
+            toId
+        );
+    }
+
+    private bool ConnectionExists(
+        NeuralNetwork network,
+        int fromId,
+        int toId)
+    {
+        if (network == null ||
+            network.connections == null)
+        {
+            return false;
+        }
+
         for (int i = 0;
-             i < genome.network.connections.Count;
+             i < network.connections.Count;
              i++)
         {
             NEATConnection connection =
-                genome.network.connections[i];
+                network.connections[i];
 
             if (connection == null ||
                 connection.fromNode == null ||
@@ -1943,7 +2030,7 @@ public class EvolutionManager : MonoBehaviour
     {
         Dictionary<int, NEATConnection>
             result =
-            new Dictionary<int, NEATConnection>();
+                new Dictionary<int, NEATConnection>();
 
         if (genome == null ||
             genome.network == null ||
@@ -2123,8 +2210,7 @@ public class EvolutionManager : MonoBehaviour
         {
             if (innovation > max)
             {
-                max =
-                    innovation;
+                max = innovation;
             }
         }
 
@@ -2325,12 +2411,85 @@ public class EvolutionManager : MonoBehaviour
             network,
             nodeMap
         );
+
+        EnsureDirectionInputConnections(
+            network
+        );
+    }
+
+    private void EnsureDirectionInputConnections(
+        NeuralNetwork network)
+    {
+        if (network == null ||
+            network.nodes == null)
+        {
+            return;
+        }
+
+        NEATNode directionInput =
+            FindNodeById(
+                network,
+                DirectionInputNodeId
+            );
+
+        if (directionInput == null)
+        {
+            return;
+        }
+
+        for (int i = 0;
+             i < OutputCount;
+             i++)
+        {
+            int outputId =
+                OutputStartNodeId + i;
+
+            NEATNode outputNode =
+                FindNodeById(
+                    network,
+                    outputId
+                );
+
+            if (outputNode == null ||
+                ConnectionExists(
+                    network,
+                    DirectionInputNodeId,
+                    outputId
+                ))
+            {
+                continue;
+            }
+
+            int innovation =
+                GetOrCreateInnovation(
+                    DirectionInputNodeId,
+                    outputId
+                );
+
+            network.connections.Add(
+                new NEATConnection(
+                    directionInput,
+                    outputNode,
+                    Random.Range(
+                        -1f,
+                        1f
+                    ),
+                    innovation
+                )
+            );
+        }
     }
 
     private NEATNode FindNodeById(
         NeuralNetwork network,
         int id)
     {
+        if (network == null ||
+            network.nodes == null)
+        {
+            return null;
+        }
+
         for (int i = 0;
              i < network.nodes.Count;
              i++)
@@ -2343,6 +2502,21 @@ public class EvolutionManager : MonoBehaviour
         }
 
         return null;
+    }
+
+    private NEATNode FindNodeById(
+        Genome genome,
+        int id)
+    {
+        if (genome == null)
+        {
+            return null;
+        }
+
+        return FindNodeById(
+            genome.network,
+            id
+        );
     }
 
     private void SaveTopGenomes(
@@ -2403,6 +2577,48 @@ public class EvolutionManager : MonoBehaviour
         );
     }
 
+    private List<Genome> LoadTopGenomesFromFolder(
+        string folderName,
+        int genNumber)
+    {
+        string folderPath =
+            Path.Combine(
+                Application.persistentDataPath,
+                folderName
+            );
+
+        string filePath =
+            Path.Combine(
+                folderPath,
+                "gen_" +
+                genNumber.ToString("D5") +
+                "_top10.json"
+            );
+
+        if (!File.Exists(filePath))
+        {
+            return null;
+        }
+
+        string json =
+            File.ReadAllText(
+                filePath
+            );
+
+        GenerationSave save =
+            JsonUtility.FromJson<GenerationSave>(
+                json
+            );
+
+        if (save == null ||
+            save.genomes == null)
+        {
+            return null;
+        }
+
+        return save.genomes;
+    }
+
     private List<Genome> LoadTopGenomes(
         int genNumber)
     {
@@ -2420,7 +2636,9 @@ public class EvolutionManager : MonoBehaviour
         }
 
         string json =
-            File.ReadAllText(filePath);
+            File.ReadAllText(
+                filePath
+            );
 
         GenerationSave save =
             JsonUtility.FromJson<GenerationSave>(
@@ -2576,29 +2794,5 @@ public class EvolutionManager : MonoBehaviour
                 );
             }
         }
-    }
-    public Genome GetBestGenome()
-    {
-        return GetBestGenome(population);
-    }
-
-    public Genome GetBestGenome(List<Genome> genomes)
-    {
-        if (genomes == null || genomes.Count == 0)
-        {
-            return null;
-        }
-
-        Genome best = genomes[0];
-
-        for (int i = 1; i < genomes.Count; i++)
-        {
-            if (genomes[i].fitness > best.fitness)
-            {
-                best = genomes[i];
-            }
-        }
-
-        return best;
     }
 }
