@@ -30,17 +30,43 @@ public class Ghost : MonoBehaviour
     public void ResetState()
     {
         gameObject.SetActive(true);
-        movement.ResetState();
 
-        frightened.Disable();
-        chase.Disable();
-        scatter.Enable();
+        GameManager gameManager =
+            GetComponentInParent<GameManager>();
 
-        if (home != initialBehavior) {
+        if (gameManager != null &&
+            gameManager.pacman != null)
+        {
+            target = gameManager.pacman.transform;
+        }
+
+        if (movement != null)
+        {
+            movement.ResetState();
+        }
+
+        if (frightened != null)
+        {
+            frightened.Disable();
+        }
+
+        if (chase != null)
+        {
+            chase.Disable();
+        }
+
+        if (scatter != null)
+        {
+            scatter.Enable();
+        }
+
+        if (home != null && home != initialBehavior)
+        {
             home.Disable();
         }
 
-        if (initialBehavior != null) {
+        if (initialBehavior != null)
+        {
             initialBehavior.Enable();
         }
     }
@@ -53,14 +79,26 @@ public class Ghost : MonoBehaviour
 
     private void OnCollisionEnter2D(Collision2D collision)
     {
-        if (collision.gameObject.layer == LayerMask.NameToLayer("Pacman"))
+        if (collision.gameObject.layer != LayerMask.NameToLayer("Pacman"))
         {
-            if (frightened.enabled) {
-                transform.parent.GetComponent<GameManager>().GhostEaten(this);
-            } else {
-                transform.parent.GetComponent<GameManager>().PacmanEaten();
-            }
+            return;
+        }
+
+        GameManager gameManager =
+            GetComponentInParent<GameManager>();
+
+        if (gameManager == null)
+        {
+            return;
+        }
+
+        if (frightened != null && frightened.enabled)
+        {
+            gameManager.GhostEaten(this);
+        }
+        else
+        {
+            gameManager.PacmanEaten();
         }
     }
-
 }

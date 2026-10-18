@@ -5,13 +5,17 @@ using UnityEngine;
 public class EvolutionManager : MonoBehaviour
 {
     [Header("Evolution Settings")]
-    public int populationSize = 20;
+    public int populationSize = 45;
     public float generationDuration = 20f;
+
+    [Header("Manual Network")]
+    public bool useManualNetworkPopulation = false;
+    public TextAsset manualNetworkJson;
 
     [Header("NEAT Settings")]
     [Range(0f, 1f)] public float crossoverRate = 0.75f;
     [Range(0f, 1f)] public float weightMutationRate = 0.15f;
-    [Range(0f, 1f)] public float addConnectionMutationRate = 0.05f;
+    [Range(0f, 1f)] public float addConnectionMutationRate = 0.08f;
     [Range(0f, 1f)] public float addNodeMutationRate = 0.05f;
     [Range(0f, 1f)] public float reenableConnectionMutationRate = 0.02f;
     [Range(0f, 1f)] public float weightResetRate = 0.10f;
@@ -23,8 +27,8 @@ public class EvolutionManager : MonoBehaviour
     public float excessCoefficient = 1f;
     public float disjointCoefficient = 1f;
     public float weightDifferenceCoefficient = 0.4f;
-    public int maxEliteSpecies = 4;
-    public int tournamentSize = 2;
+    public int maxEliteSpecies = 2;
+    public int tournamentSize = 3;
     public int topGenomesToSave = 10;
 
     [HideInInspector] public List<Genome> population =
@@ -37,38 +41,51 @@ public class EvolutionManager : MonoBehaviour
     [HideInInspector] public float timer = 0f;
 
     private const string SaveFolderName =
-        "Genomes_NEAT_Phase1_Completion_Continue";
+        "genomes";
 
-    private const string PrimarySourceSaveFolderName =
-        "Genomes_NEAT_Phase1_Completion_Continue";
-
-    private const string SecondarySourceSaveFolderName =
-        "Genomes_NEAT_Phase1_Completion";
-
-    private const int RollbackGeneration = 450;
     private const int ExistingInputCount = 13;
     private const int DirectionInputNodeId = 1000000;
     private const int OutputStartNodeId = 13;
     private const int OutputCount = 4;
 
-    private const string RollbackMarkerFileName =
-        "rollback_450_initialized.json";
+    private string HistoricalBestFileName;
+    private string HistoricalBestGenomeFileName;
+    private string BestCompletedGenomeFileName;
+    private string BestProgressGenomeFileName;
+    private string BestAlternativeProgressGenomeFileName;
 
-    private const string HistoricalBestFileName =
-        "historical_best.json";
+    private const string GenerationHistoryFileName =
+        "generation_history.json";
+
+    [Header("Difficulty Stage")]
+    public int ghostCountStageOverride = 4;
+
+    private int stageGhostCount = -1;
+
+    private const int ProtectedCompletedCopies = 5;
+    private const int ProtectedProgressCopies = 5;
 
     private PopulationSpawner spawner;
     private string saveFolderPath;
 
     private readonly Dictionary<string, int>
         innovationHistory =
-            new Dictionary<string, int>();
+        new Dictionary<string, int>();
 
     private int nextInnovationNumber = 1;
     private int lastSpeciesCount = 0;
 
     private float historicalBestFitness =
         float.MinValue;
+
+    private Genome historicalBestGenome;
+    private Genome bestCompletedGenome;
+    private Genome bestProgressGenome;
+    private int bestProgressMinimumPelletsRemaining = int.MaxValue;
+    private Genome bestAlternativeProgressGenome;
+    private int bestAlternativeProgressMinimumPelletsRemaining = int.MaxValue;
+    private List<GenerationResult> generationHistory =
+        new List<GenerationResult>();
 
     private class Species
     {
@@ -84,6 +101,12 @@ public class EvolutionManager : MonoBehaviour
     private class GenerationSave
     {
         public int generation;
+        public int ghostCount;
+        public float maxFitness;
+        public bool completed;
+        public int completionCount;
+        public float bestCompletionTime;
+        public int minimumPelletsRemaining;
         public List<Genome> genomes =
             new List<Genome>();
     }
@@ -92,6 +115,32 @@ public class EvolutionManager : MonoBehaviour
     private class HistoricalBestSave
     {
         public float bestFitness;
+    }
+
+    [System.Serializable]
+    private class BestProgressSave
+    {
+        public int minimumPelletsRemaining;
+        public Genome genome;
+    }
+
+    [System.Serializable]
+    private class GenerationResult
+    {
+        public int generation;
+        public int ghostCount;
+        public float maxFitness;
+        public bool completed;
+        public int completionCount;
+        public float bestCompletionTime;
+        public int minimumPelletsRemaining;
+    }
+
+    [System.Serializable]
+    private class GenerationHistorySave
+    {
+        public List<GenerationResult> generations =
+            new List<GenerationResult>();
     }
 
     [System.Serializable]
@@ -147,6 +196,8 @@ public class EvolutionManager : MonoBehaviour
     [System.Serializable]
     public class NeuralNetwork
     {
+        public bool manualNavigation;
+
         public List<NEATNode> nodes =
             new List<NEATNode>();
 
@@ -304,8 +355,6 @@ public class EvolutionManager : MonoBehaviour
                 Application.persistentDataPath,
                 SaveFolderName
             );
-
-        LoadHistoricalBestFitness();
     }
 
     private void Start()
@@ -313,15 +362,137 @@ public class EvolutionManager : MonoBehaviour
         spawner =
             FindAnyObjectByType<PopulationSpawner>();
 
+        stageGhostCount =
+            ghostCountStageOverride >= 0
+                ? ghostCountStageOverride
+                : DetectConfiguredGhostCount();
+
+        ConfigureStageFileNames();
+
+        if (!Directory.Exists(saveFolderPath))
+        {
+            Directory.CreateDirectory(saveFolderPath);
+        }
+
+        
+
+        if (!useManualNetworkPopulation)
+        {
+            LoadHistoricalBestFitness();
+            LoadHistoricalBestGenome();
+            LoadBestCompletedGenome();
+            LoadBestProgressGenome();
+            LoadBestAlternativeProgressGenome();
+            LoadGenerationHistory();
+        }
+
         InitializePopulation();
         StartGeneration();
+    }
+
+    private void ConfigureStageFileNames()
+    {
+        string suffix = "_ghosts_" + Mathf.Max(0, stageGhostCount);
+
+        HistoricalBestFileName = "historical_best" + suffix + ".json";
+        HistoricalBestGenomeFileName = "historical_best_genome" + suffix + ".json";
+        BestCompletedGenomeFileName = "best_completed_genome" + suffix + ".json";
+        BestProgressGenomeFileName = "best_progress_genome" + suffix + ".json";
+        BestAlternativeProgressGenomeFileName = "best_progress_alternative_genome" + suffix + ".json";
+    }
+
+    private int DetectConfiguredGhostCount()
+    {
+        if (spawner == null || spawner.mazePrefab == null)
+        {
+            Debug.LogWarning(
+                "EvolutionManager: no se ha podido detectar el prefab del laberinto. Configura ghostCountStageOverride con el número de fantasmas de esta fase."
+            );
+            return 0;
+        }
+
+        GameManager prefabGameManager =
+            spawner.mazePrefab.GetComponent<GameManager>();
+
+        if (prefabGameManager == null)
+        {
+            prefabGameManager =
+                spawner.mazePrefab.GetComponentInChildren<GameManager>(true);
+        }
+
+        if (prefabGameManager == null || prefabGameManager.ghosts == null)
+        {
+            Debug.LogWarning(
+                "EvolutionManager: no se ha encontrado el array de fantasmas en el prefab. Configura ghostCountStageOverride manualmente."
+            );
+            return 0;
+        }
+
+        int configuredReferences = 0;
+        int activeConfiguredGhosts = 0;
+
+        for (int i = 0; i < prefabGameManager.ghosts.Length; i++)
+        {
+            Ghost ghost = prefabGameManager.ghosts[i];
+
+            if (ghost == null)
+            {
+                continue;
+            }
+
+            configuredReferences++;
+
+            if (IsActiveInPrefabHierarchy(
+                    ghost.transform,
+                    spawner.mazePrefab.transform))
+            {
+                activeConfiguredGhosts++;
+            }
+        }
+
+        if (activeConfiguredGhosts > 0)
+        {
+            return activeConfiguredGhosts;
+        }
+
+        return configuredReferences;
+    }
+
+    private bool IsActiveInPrefabHierarchy(
+        Transform target,
+        Transform prefabRoot)
+    {
+        Transform current = target;
+
+        while (current != null)
+        {
+            if (!current.gameObject.activeSelf)
+            {
+                return false;
+            }
+
+            if (current == prefabRoot)
+            {
+                return true;
+            }
+
+            current = current.parent;
+        }
+
+        return false;
     }
 
     private void Update()
     {
         timer += Time.deltaTime;
 
-        UpdateHistoricalBestFitness();
+        if (!useManualNetworkPopulation)
+        {
+            UpdateHistoricalBestFitness();
+            UpdateBestCompletedGenome();
+            UpdateBestProgressGenome();
+        }
+
         UpdateLeaderHighlight();
 
         if (AllAgentsDead())
@@ -389,6 +560,84 @@ public class EvolutionManager : MonoBehaviour
         return completed;
     }
 
+    public float GetCurrentBestCompletionTime()
+    {
+        if (activeAgents == null)
+        {
+            return -1f;
+        }
+
+        float bestTime =
+            float.MaxValue;
+
+        for (int i = 0;
+             i < activeAgents.Count;
+             i++)
+        {
+            AgentController agent =
+                activeAgents[i];
+
+            if (agent == null ||
+                !agent.HasCompletedMaze)
+            {
+                continue;
+            }
+
+            float completionTime =
+                agent.GetCompletionTime();
+
+            if (completionTime >= 0f &&
+                completionTime < bestTime)
+            {
+                bestTime =
+                    completionTime;
+            }
+        }
+
+        return bestTime == float.MaxValue
+            ? -1f
+            : bestTime;
+    }
+
+    public int GetCurrentMinimumPelletsRemaining()
+    {
+        if (activeAgents == null || activeAgents.Count == 0)
+        {
+            return -1;
+        }
+
+        int minimumPelletsRemaining = int.MaxValue;
+        bool foundAgent = false;
+
+        for (int i = 0; i < activeAgents.Count; i++)
+        {
+            AgentController agent = activeAgents[i];
+
+            if (agent == null)
+            {
+                continue;
+            }
+
+            int remainingPellets = agent.GetMinimumPelletsRemaining();
+
+            if (remainingPellets < 0)
+            {
+                continue;
+            }
+
+            if (remainingPellets < minimumPelletsRemaining)
+            {
+                minimumPelletsRemaining = remainingPellets;
+            }
+
+            foundAgent = true;
+        }
+
+        return foundAgent
+            ? minimumPelletsRemaining
+            : -1;
+    }
+
     public int GetCurrentSpeciesCount()
     {
         return lastSpeciesCount;
@@ -402,17 +651,238 @@ public class EvolutionManager : MonoBehaviour
             return;
         }
 
-        float currentBest =
-            GetCurrentGenerationMaxFitness();
+        Genome currentBest =
+            GetBestGenome();
 
-        if (currentBest >
+        if (currentBest == null)
+        {
+            return;
+        }
+
+        if (historicalBestGenome == null ||
+            currentBest.fitness >
             historicalBestFitness)
         {
             historicalBestFitness =
-                currentBest;
+                currentBest.fitness;
+
+            historicalBestGenome =
+                CloneGenome(
+                    currentBest
+                );
+
+            historicalBestGenome.fitness =
+                currentBest.fitness;
 
             SaveHistoricalBestFitness();
+            SaveHistoricalBestGenome();
         }
+    }
+
+    private void UpdateBestCompletedGenome()
+    {
+        if (activeAgents == null)
+        {
+            return;
+        }
+
+        for (int i = 0;
+             i < activeAgents.Count;
+             i++)
+        {
+            AgentController agent =
+                activeAgents[i];
+
+            if (agent == null ||
+                !agent.HasCompletedMaze ||
+                agent.MyGenome == null)
+            {
+                continue;
+            }
+
+            if (bestCompletedGenome == null ||
+                agent.GetFitness() >
+                bestCompletedGenome.fitness)
+            {
+                bestCompletedGenome =
+                    CloneGenome(
+                        agent.MyGenome
+                    );
+
+                bestCompletedGenome.fitness =
+                    agent.GetFitness();
+
+                SaveBestCompletedGenome();
+                RefreshBestAlternativeProgressGenome();
+            }
+        }
+    }
+
+    private void UpdateBestProgressGenome()
+    {
+        if (activeAgents == null)
+        {
+            return;
+        }
+
+        for (int i = 0;
+             i < activeAgents.Count;
+             i++)
+        {
+            AgentController agent =
+                activeAgents[i];
+
+            if (agent == null ||
+                agent.MyGenome == null)
+            {
+                continue;
+            }
+
+            int remainingPellets =
+                agent.GetMinimumPelletsRemaining();
+
+            if (remainingPellets < 0)
+            {
+                continue;
+            }
+
+            bool isBetter =
+                bestProgressGenome == null ||
+                remainingPellets <
+                bestProgressMinimumPelletsRemaining;
+
+            bool isSameProgressButBetterFitness =
+                bestProgressGenome != null &&
+                remainingPellets ==
+                bestProgressMinimumPelletsRemaining &&
+                agent.GetFitness() >
+                bestProgressGenome.fitness;
+
+            if (isBetter || isSameProgressButBetterFitness)
+            {
+                bestProgressGenome =
+                    CloneGenome(
+                        agent.MyGenome
+                    );
+
+                bestProgressGenome.fitness =
+                    agent.GetFitness();
+
+                bestProgressMinimumPelletsRemaining =
+                    remainingPellets;
+
+                SaveBestProgressGenome();
+            }
+
+            if (bestCompletedGenome != null &&
+                AreGenomesStructurallyEqual(
+                    agent.MyGenome,
+                    bestCompletedGenome
+                ))
+            {
+                continue;
+            }
+
+            bool isBetterAlternative =
+                bestAlternativeProgressGenome == null ||
+                remainingPellets <
+                bestAlternativeProgressMinimumPelletsRemaining;
+
+            bool isSameAlternativeProgressButBetterFitness =
+                bestAlternativeProgressGenome != null &&
+                remainingPellets ==
+                bestAlternativeProgressMinimumPelletsRemaining &&
+                agent.GetFitness() >
+                bestAlternativeProgressGenome.fitness;
+
+            if (isBetterAlternative ||
+                isSameAlternativeProgressButBetterFitness)
+            {
+                bestAlternativeProgressGenome =
+                    CloneGenome(
+                        agent.MyGenome
+                    );
+
+                bestAlternativeProgressGenome.fitness =
+                    agent.GetFitness();
+
+                bestAlternativeProgressMinimumPelletsRemaining =
+                    remainingPellets;
+
+                SaveBestAlternativeProgressGenome();
+            }
+        }
+    }
+
+    private void RefreshBestAlternativeProgressGenome()
+    {
+        bestAlternativeProgressGenome = null;
+        bestAlternativeProgressMinimumPelletsRemaining =
+            int.MaxValue;
+
+        if (activeAgents == null)
+        {
+            return;
+        }
+
+        for (int i = 0;
+             i < activeAgents.Count;
+             i++)
+        {
+            AgentController agent =
+                activeAgents[i];
+
+            if (agent == null ||
+                agent.MyGenome == null)
+            {
+                continue;
+            }
+
+            if (bestCompletedGenome != null &&
+                AreGenomesStructurallyEqual(
+                    agent.MyGenome,
+                    bestCompletedGenome
+                ))
+            {
+                continue;
+            }
+
+            int remainingPellets =
+                agent.GetMinimumPelletsRemaining();
+
+            if (remainingPellets < 0)
+            {
+                continue;
+            }
+
+            bool isBetter =
+                bestAlternativeProgressGenome == null ||
+                remainingPellets <
+                bestAlternativeProgressMinimumPelletsRemaining;
+
+            bool isSameProgressButBetterFitness =
+                bestAlternativeProgressGenome != null &&
+                remainingPellets ==
+                bestAlternativeProgressMinimumPelletsRemaining &&
+                agent.GetFitness() >
+                bestAlternativeProgressGenome.fitness;
+
+            if (isBetter || isSameProgressButBetterFitness)
+            {
+                bestAlternativeProgressGenome =
+                    CloneGenome(
+                        agent.MyGenome
+                    );
+
+                bestAlternativeProgressGenome.fitness =
+                    agent.GetFitness();
+
+                bestAlternativeProgressMinimumPelletsRemaining =
+                    remainingPellets;
+            }
+        }
+
+        SaveBestAlternativeProgressGenome();
     }
 
     private void LoadHistoricalBestFitness()
@@ -437,22 +907,375 @@ public class EvolutionManager : MonoBehaviour
             {
                 historicalBestFitness =
                     save.bestFitness;
+            }
+        }
+    }
+
+    private void LoadHistoricalBestGenome()
+    {
+        string filePath =
+            Path.Combine(
+                saveFolderPath,
+                HistoricalBestGenomeFileName
+            );
+
+        if (File.Exists(filePath))
+        {
+            string json =
+                File.ReadAllText(filePath);
+
+            Genome loadedGenome =
+                JsonUtility.FromJson<Genome>(
+                    json
+                );
+
+            if (loadedGenome != null &&
+                loadedGenome.network != null)
+            {
+                SanitizeNetwork(
+                    loadedGenome.network
+                );
+
+                historicalBestGenome =
+                    loadedGenome;
+
+                if (historicalBestGenome.fitness >
+                    historicalBestFitness)
+                {
+                    historicalBestFitness =
+                        historicalBestGenome.fitness;
+                }
 
                 return;
             }
         }
 
-        float bestFromGenerations =
-            FindHistoricalBestFromGenerations();
+        Genome bestFromGenerations =
+            FindHistoricalBestGenomeFromGenerations();
 
-        if (bestFromGenerations !=
-            float.MinValue)
+        if (bestFromGenerations != null)
         {
-            historicalBestFitness =
+            historicalBestGenome =
                 bestFromGenerations;
 
-            SaveHistoricalBestFitness();
+            if (historicalBestGenome.fitness >
+                historicalBestFitness)
+            {
+                historicalBestFitness =
+                    historicalBestGenome.fitness;
+            }
+
+            SaveHistoricalBestGenome();
         }
+    }
+
+    private Genome FindHistoricalBestGenomeFromGenerations()
+    {
+        if (!Directory.Exists(
+                saveFolderPath))
+        {
+            return null;
+        }
+
+        string[] files =
+            Directory.GetFiles(
+                saveFolderPath,
+                "gen_*_top10.json"
+            );
+
+        Genome bestGenome =
+            null;
+
+        for (int i = 0;
+             i < files.Length;
+             i++)
+        {
+            string json =
+                File.ReadAllText(
+                    files[i]
+                );
+
+            GenerationSave save =
+                JsonUtility.FromJson<GenerationSave>(
+                    json
+                );
+
+            if (save == null ||
+                save.genomes == null ||
+                !json.Contains("\"ghostCount\"") ||
+                save.ghostCount != stageGhostCount)
+            {
+                continue;
+            }
+
+            for (int j = 0;
+                 j < save.genomes.Count;
+                 j++)
+            {
+                Genome candidate =
+                    save.genomes[j];
+
+                if (candidate == null ||
+                    candidate.network == null)
+                {
+                    continue;
+                }
+
+                if (bestGenome == null ||
+                    candidate.fitness >
+                    bestGenome.fitness)
+                {
+                    bestGenome =
+                        CloneGenome(
+                            candidate
+                        );
+                }
+            }
+        }
+
+        return bestGenome;
+    }
+
+    private void LoadBestCompletedGenome()
+    {
+        string filePath =
+            Path.Combine(
+                saveFolderPath,
+                BestCompletedGenomeFileName
+            );
+
+        if (!File.Exists(filePath))
+        {
+            return;
+        }
+
+        string json =
+            File.ReadAllText(filePath);
+
+        Genome loadedGenome =
+            JsonUtility.FromJson<Genome>(
+                json
+            );
+
+        if (loadedGenome != null &&
+            loadedGenome.network != null)
+        {
+            SanitizeNetwork(
+                loadedGenome.network
+            );
+
+            bestCompletedGenome =
+                loadedGenome;
+        }
+    }
+
+    private void LoadBestProgressGenome()
+    {
+        string filePath =
+            Path.Combine(
+                saveFolderPath,
+                BestProgressGenomeFileName
+            );
+
+        if (!File.Exists(filePath))
+        {
+            return;
+        }
+
+        string json =
+            File.ReadAllText(filePath);
+
+        BestProgressSave save =
+            JsonUtility.FromJson<BestProgressSave>(
+                json
+            );
+
+        if (save == null ||
+            save.genome == null ||
+            save.genome.network == null ||
+            save.minimumPelletsRemaining < 0)
+        {
+            return;
+        }
+
+        SanitizeNetwork(
+            save.genome.network
+        );
+
+        bestProgressGenome =
+            save.genome;
+
+        bestProgressMinimumPelletsRemaining =
+            save.minimumPelletsRemaining;
+    }
+
+    private void SaveHistoricalBestGenome()
+    {
+        if (historicalBestGenome == null ||
+            historicalBestGenome.network == null)
+        {
+            return;
+        }
+
+        string json =
+            JsonUtility.ToJson(
+                historicalBestGenome,
+                true
+            );
+
+        File.WriteAllText(
+            Path.Combine(
+                saveFolderPath,
+                HistoricalBestGenomeFileName
+            ),
+            json
+        );
+    }
+
+    private void SaveBestCompletedGenome()
+    {
+        if (bestCompletedGenome == null ||
+            bestCompletedGenome.network == null)
+        {
+            return;
+        }
+
+        string json =
+            JsonUtility.ToJson(
+                bestCompletedGenome,
+                true
+            );
+
+        File.WriteAllText(
+            Path.Combine(
+                saveFolderPath,
+                BestCompletedGenomeFileName
+            ),
+            json
+        );
+    }
+
+    private void LoadBestAlternativeProgressGenome()
+    {
+        string filePath =
+            Path.Combine(
+                saveFolderPath,
+                BestAlternativeProgressGenomeFileName
+            );
+
+        if (!File.Exists(filePath))
+        {
+            return;
+        }
+
+        string json =
+            File.ReadAllText(filePath);
+
+        BestProgressSave save =
+            JsonUtility.FromJson<BestProgressSave>(
+                json
+            );
+
+        if (save == null ||
+            save.genome == null ||
+            save.genome.network == null ||
+            save.minimumPelletsRemaining < 0)
+        {
+            return;
+        }
+
+        SanitizeNetwork(
+            save.genome.network
+        );
+
+        if (bestCompletedGenome != null &&
+            AreGenomesStructurallyEqual(
+                save.genome,
+                bestCompletedGenome
+            ))
+        {
+            return;
+        }
+
+        bestAlternativeProgressGenome =
+            save.genome;
+
+        bestAlternativeProgressMinimumPelletsRemaining =
+            save.minimumPelletsRemaining;
+    }
+
+    private void SaveBestProgressGenome()
+    {
+        if (bestProgressGenome == null ||
+            bestProgressGenome.network == null ||
+            bestProgressMinimumPelletsRemaining == int.MaxValue)
+        {
+            return;
+        }
+
+        BestProgressSave save =
+            new BestProgressSave();
+
+        save.minimumPelletsRemaining =
+            bestProgressMinimumPelletsRemaining;
+
+        save.genome =
+            bestProgressGenome;
+
+        string json =
+            JsonUtility.ToJson(
+                save,
+                true
+            );
+
+        File.WriteAllText(
+            Path.Combine(
+                saveFolderPath,
+                BestProgressGenomeFileName
+            ),
+            json
+        );
+    }
+
+    private void SaveBestAlternativeProgressGenome()
+    {
+        string filePath =
+            Path.Combine(
+                saveFolderPath,
+                BestAlternativeProgressGenomeFileName
+            );
+
+        if (bestAlternativeProgressGenome == null ||
+            bestAlternativeProgressGenome.network == null ||
+            bestAlternativeProgressMinimumPelletsRemaining == int.MaxValue)
+        {
+            if (File.Exists(filePath))
+            {
+                File.Delete(filePath);
+            }
+
+            return;
+        }
+
+        BestProgressSave save =
+            new BestProgressSave();
+
+        save.minimumPelletsRemaining =
+            bestAlternativeProgressMinimumPelletsRemaining;
+
+        save.genome =
+            bestAlternativeProgressGenome;
+
+        string json =
+            JsonUtility.ToJson(
+                save,
+                true
+            );
+
+        File.WriteAllText(
+            filePath,
+            json
+        );
     }
 
     private float FindHistoricalBestFromGenerations()
@@ -485,7 +1308,9 @@ public class EvolutionManager : MonoBehaviour
                 );
 
             if (save == null ||
-                save.genomes == null)
+                save.genomes == null ||
+                !json.Contains("\"ghostCount\"") ||
+                save.ghostCount != stageGhostCount)
             {
                 continue;
             }
@@ -504,6 +1329,396 @@ public class EvolutionManager : MonoBehaviour
         }
 
         return best;
+    }
+
+    private void LoadGenerationHistory()
+    {
+        generationHistory =
+            new List<GenerationResult>();
+
+        string filePath =
+            Path.Combine(
+                saveFolderPath,
+                GenerationHistoryFileName
+            );
+
+        if (File.Exists(filePath))
+        {
+            string json =
+                File.ReadAllText(filePath);
+
+            GenerationHistorySave save =
+                JsonUtility.FromJson<GenerationHistorySave>(
+                    json
+                );
+
+            if (save != null &&
+                save.generations != null)
+            {
+                generationHistory =
+                    save.generations;
+
+                bool historyHasGhostCount =
+                    json.Contains("\"ghostCount\"");
+
+                if (!historyHasGhostCount)
+                {
+                    for (int i = 0;
+                         i < generationHistory.Count;
+                         i++)
+                    {
+                        if (generationHistory[i] != null)
+                        {
+                            generationHistory[i].ghostCount = -1;
+                        }
+                    }
+                }
+                else
+                {
+                    for (int i = 0;
+                         i < generationHistory.Count;
+                         i++)
+                    {
+                        if (generationHistory[i] != null &&
+                            generationHistory[i].ghostCount == 0)
+                        {
+                            generationHistory[i].ghostCount = -1;
+                        }
+                    }
+                }
+            }
+        }
+
+        RepairGenerationHistory();
+
+        if (Directory.Exists(saveFolderPath))
+        {
+            SaveGenerationHistory();
+        }
+    }
+
+    private void RepairGenerationHistory()
+    {
+        if (generationHistory == null)
+        {
+            generationHistory =
+                new List<GenerationResult>();
+        }
+
+        if (!Directory.Exists(saveFolderPath))
+        {
+            return;
+        }
+
+        string[] files =
+            Directory.GetFiles(
+                saveFolderPath,
+                "gen_*_top10.json"
+            );
+
+        for (int i = 0;
+             i < files.Length;
+             i++)
+        {
+            string json =
+                File.ReadAllText(files[i]);
+
+            GenerationSave save =
+                JsonUtility.FromJson<GenerationSave>(
+                    json
+                );
+
+            if (save == null)
+            {
+                continue;
+            }
+
+            float maxFitness =
+                float.MinValue;
+
+            if (save.genomes != null)
+            {
+                for (int j = 0;
+                     j < save.genomes.Count;
+                     j++)
+                {
+                    Genome genome =
+                        save.genomes[j];
+
+                    if (genome != null &&
+                        genome.fitness > maxFitness)
+                    {
+                        maxFitness =
+                            genome.fitness;
+                    }
+                }
+            }
+
+            if (save.maxFitness > maxFitness)
+            {
+                maxFitness =
+                    save.maxFitness;
+            }
+
+            bool hasCompletionCount =
+                json.Contains("\"completionCount\"");
+
+            bool hasBestCompletionTime =
+                json.Contains("\"bestCompletionTime\"");
+
+            bool hasMinimumPelletsRemaining =
+                json.Contains("\"minimumPelletsRemaining\"");
+
+            bool hasGhostCount =
+                json.Contains("\"ghostCount\"");
+
+            GenerationResult existing =
+                null;
+
+            for (int j = 0;
+                 j < generationHistory.Count;
+                 j++)
+            {
+                if (generationHistory[j] != null &&
+                    generationHistory[j].generation ==
+                    save.generation)
+                {
+                    existing =
+                        generationHistory[j];
+                    break;
+                }
+            }
+
+            bool hasUsableFitness =
+                maxFitness != float.MinValue &&
+                maxFitness > 0f;
+
+            if (save.maxFitness > 0f)
+            {
+                hasUsableFitness = true;
+                maxFitness = Mathf.Max(
+                    maxFitness,
+                    save.maxFitness
+                );
+            }
+
+            if (existing == null)
+            {
+                GenerationResult result =
+                    new GenerationResult();
+
+                result.generation =
+                    save.generation;
+
+                result.ghostCount =
+                    hasGhostCount
+                        ? save.ghostCount
+                        : -1;
+
+                result.maxFitness =
+                    hasUsableFitness
+                        ? maxFitness
+                        : 0f;
+
+                result.completed =
+                    save.completed;
+
+                result.completionCount =
+                    hasCompletionCount
+                        ? save.completionCount
+                        : (save.completed ? -1 : 0);
+
+                result.bestCompletionTime =
+                    hasBestCompletionTime
+                        ? save.bestCompletionTime
+                        : (save.completed ? -1f : -1f);
+
+                result.minimumPelletsRemaining =
+                    hasMinimumPelletsRemaining
+                        ? ((!save.completed &&
+                            save.minimumPelletsRemaining == 0)
+                            ? -1
+                            : save.minimumPelletsRemaining)
+                        : -1;
+
+                generationHistory.Add(result);
+            }
+            else
+            {
+                if (hasGhostCount)
+                {
+                    existing.ghostCount = save.ghostCount;
+                }
+                else if (existing.ghostCount == 0)
+                {
+                    existing.ghostCount = -1;
+                }
+
+                if (hasUsableFitness &&
+                    (existing.maxFitness <= 0f ||
+                     maxFitness > existing.maxFitness))
+                {
+                    existing.maxFitness =
+                        maxFitness;
+                }
+
+                if (save.completed)
+                {
+                    existing.completed = true;
+                }
+
+                if (hasCompletionCount)
+                {
+                    existing.completionCount =
+                        save.completionCount;
+                }
+                else if (existing.completed &&
+                         existing.completionCount == 0)
+                {
+                    existing.completionCount = -1;
+                }
+
+                if (hasBestCompletionTime)
+                {
+                    existing.bestCompletionTime =
+                        save.bestCompletionTime;
+                }
+                else if (existing.completed &&
+                         existing.bestCompletionTime == 0f)
+                {
+                    existing.bestCompletionTime = -1f;
+                }
+
+                if (hasMinimumPelletsRemaining)
+                {
+                    existing.minimumPelletsRemaining =
+                        (!save.completed &&
+                         save.minimumPelletsRemaining == 0)
+                            ? -1
+                            : save.minimumPelletsRemaining;
+                }
+                else if (existing.minimumPelletsRemaining == 0)
+                {
+                    existing.minimumPelletsRemaining = -1;
+                }
+            }
+        }
+
+        generationHistory.RemoveAll(
+            item => item == null
+        );
+
+        generationHistory.Sort(
+            (a, b) =>
+                a.generation.CompareTo(
+                    b.generation
+                )
+        );
+    }
+
+    private void SaveGenerationHistory()
+    {
+        if (!Directory.Exists(saveFolderPath))
+        {
+            Directory.CreateDirectory(saveFolderPath);
+        }
+
+        GenerationHistorySave save =
+            new GenerationHistorySave();
+
+        save.generations =
+            generationHistory;
+
+        string json =
+            JsonUtility.ToJson(
+                save,
+                true
+            );
+
+        string filePath =
+            Path.Combine(
+                saveFolderPath,
+                GenerationHistoryFileName
+            );
+
+        string tempPath =
+            filePath + ".tmp";
+
+        File.WriteAllText(
+            tempPath,
+            json
+        );
+
+        if (File.Exists(filePath))
+        {
+            File.Delete(filePath);
+        }
+
+        File.Move(
+            tempPath,
+            filePath
+        );
+    }
+
+    private void SaveGenerationResult()
+    {
+        LoadGenerationHistory();
+
+        GenerationResult result =
+            new GenerationResult();
+
+        result.generation =
+            generationCount;
+
+        result.ghostCount =
+            stageGhostCount;
+
+        result.maxFitness =
+            GetCurrentGenerationMaxFitness();
+
+        result.completionCount =
+            GetCurrentCompletedCount();
+
+        result.completed =
+            result.completionCount > 0;
+
+        result.bestCompletionTime =
+            GetCurrentBestCompletionTime();
+
+        result.minimumPelletsRemaining =
+            GetCurrentMinimumPelletsRemaining();
+
+        bool updated = false;
+
+        for (int i = 0;
+             i < generationHistory.Count;
+             i++)
+        {
+            if (generationHistory[i] != null &&
+                generationHistory[i].generation ==
+                result.generation)
+            {
+                generationHistory[i] =
+                    result;
+
+                updated = true;
+                break;
+            }
+        }
+
+        if (!updated)
+        {
+            generationHistory.Add(result);
+        }
+
+        generationHistory.Sort(
+            (a, b) =>
+                a.generation.CompareTo(
+                    b.generation
+                )
+        );
+
+        SaveGenerationHistory();
     }
 
     private void SaveHistoricalBestFitness()
@@ -537,94 +1752,30 @@ public class EvolutionManager : MonoBehaviour
         population =
             new List<Genome>();
 
-        if (!Directory.Exists(saveFolderPath))
+        if (useManualNetworkPopulation)
         {
             generationCount = 1;
-
-            for (int i = 0;
-                 i < populationSize;
-                 i++)
-            {
-                population.Add(
-                    CreateInitialGenome()
-                );
-            }
-
+            FillManualNetworkPopulation();
             return;
         }
 
-        string rollbackMarkerPath =
-            Path.Combine(
-                saveFolderPath,
-                RollbackMarkerFileName
-            );
-
-        bool rollbackInitialized =
-            File.Exists(rollbackMarkerPath);
-
-        if (!rollbackInitialized)
+        if (!Directory.Exists(saveFolderPath))
         {
-            List<Genome> rollbackTop =
-                LoadTopGenomesFromFolder(
-                    SaveFolderName,
-                    RollbackGeneration
-                );
-
-            if (rollbackTop == null ||
-                rollbackTop.Count == 0)
-            {
-                rollbackTop =
-                    LoadTopGenomesFromFolder(
-                        PrimarySourceSaveFolderName,
-                        RollbackGeneration
-                    );
-            }
-
-            if (rollbackTop == null ||
-                rollbackTop.Count == 0)
-            {
-                rollbackTop =
-                    LoadTopGenomesFromFolder(
-                        SecondarySourceSaveFolderName,
-                        RollbackGeneration
-                    );
-            }
-
-            if (rollbackTop != null &&
-                rollbackTop.Count > 0)
-            {
-                RemoveGenerationsAfterRollback();
-
-                BuildPopulationFromSavedTop(
-                    rollbackTop,
-                    true
-                );
-
-                GenerationSave marker =
-                    new GenerationSave();
-
-                marker.generation =
-                    RollbackGeneration;
-
-                File.WriteAllText(
-                    rollbackMarkerPath,
-                    JsonUtility.ToJson(marker, true)
-                );
-
-                generationCount =
-                    RollbackGeneration + 1;
-
-                return;
-            }
+            Directory.CreateDirectory(saveFolderPath);
         }
 
         int latestGen =
             GetLatestGenerationNumber();
 
-        if (latestGen > 0)
+        int seedGen =
+            GetBestSeedGenerationForCurrentStage();
+
+        if (seedGen >= 0)
         {
             List<Genome> savedTop =
-                LoadTopGenomes(latestGen);
+                LoadTopGenomes(
+                    seedGen
+                );
 
             if (savedTop != null &&
                 savedTop.Count > 0)
@@ -635,71 +1786,308 @@ public class EvolutionManager : MonoBehaviour
                 );
 
                 generationCount =
-                    latestGen + 1;
+                    latestGen >= 0
+                        ? latestGen + 1
+                        : seedGen + 1;
+
+                if (seedGen != latestGen)
+                {
+                    Debug.Log(
+                        "EvolutionManager: se inicia la fase de " +
+                        stageGhostCount +
+                        " fantasma(s) usando como punto de partida la población guardada en la generación " +
+                        seedGen +
+                        ", sin importar sus mejores genomas como soluciones completadoras de esta fase."
+                    );
+                }
 
                 return;
             }
         }
 
-        generationCount = 1;
+        Genome savedProgressGenome =
+            bestAlternativeProgressGenome;
+
+        if (savedProgressGenome == null &&
+            bestProgressGenome != null &&
+            (bestCompletedGenome == null ||
+             !AreGenomesStructurallyEqual(
+                 bestProgressGenome,
+                 bestCompletedGenome
+             )))
+        {
+            savedProgressGenome = bestProgressGenome;
+        }
+
+        int savedCompletedCopies =
+            bestCompletedGenome != null
+                ? Mathf.Min(ProtectedCompletedCopies, populationSize)
+                : 0;
 
         for (int i = 0;
-             i < populationSize;
+             i < savedCompletedCopies &&
+             population.Count < populationSize;
              i++)
         {
             population.Add(
-                CreateInitialGenome()
+                CloneGenome(bestCompletedGenome)
             );
         }
+
+        int savedProgressCopies =
+            savedProgressGenome != null
+                ? Mathf.Min(
+                    ProtectedProgressCopies,
+                    populationSize - population.Count
+                )
+                : 0;
+
+        for (int i = 0;
+             i < savedProgressCopies &&
+             population.Count < populationSize;
+             i++)
+        {
+            population.Add(
+                CloneGenome(savedProgressGenome)
+            );
+        }
+
+        innovationHistory.Clear();
+        nextInnovationNumber = 1;
+        lastSpeciesCount = 0;
+
+        int latestHistoryGeneration = -1;
+
+        for (int i = 0;
+             i < generationHistory.Count;
+             i++)
+        {
+            if (generationHistory[i] != null &&
+                generationHistory[i].generation > latestHistoryGeneration)
+            {
+                latestHistoryGeneration =
+                    generationHistory[i].generation;
+            }
+        }
+
+        generationCount =
+            latestGen >= 0
+                ? latestGen + 1
+                : latestHistoryGeneration + 1;
+
+        if (generationCount < 0)
+        {
+            generationCount = 0;
+        }
+
+        while (population.Count < populationSize)
+        {
+            Genome parent = null;
+
+            if (bestCompletedGenome != null)
+            {
+                parent = bestCompletedGenome;
+            }
+            else if (savedProgressGenome != null)
+            {
+                parent = savedProgressGenome;
+            }
+
+            if (parent == null)
+            {
+                population.Add(CreateInitialGenome());
+            }
+            else
+            {
+                Genome child = CloneGenome(parent);
+                Mutate(child);
+                child.fitness = 0f;
+                population.Add(child);
+            }
+        }
+    }
+
+    private void FillManualNetworkPopulation()
+    {
+        population = new List<Genome>();
+
+        int count = Mathf.Max(1, populationSize);
+
+        Genome template =
+            ManualPacmanNetworkFactory.CreateGenome(
+                manualNetworkJson
+            );
+
+        if (template == null || template.network == null)
+        {
+            Debug.LogError(
+                "EvolutionManager: no se ha podido crear la red manual. " +
+                "Asigna un JSON válido en Manual Network Json.",
+                this
+            );
+            return;
+        }
+
+        for (int i = 0; i < count; i++)
+        {
+            population.Add(CloneGenome(template));
+        }
+
+        Debug.Log(
+            "EvolutionManager: generación manual creada con " +
+            population.Count +
+            " copias independientes de la misma red neuronal JSON: " +
+            (manualNetworkJson != null ? manualNetworkJson.name : "configuración predeterminada") +
+            ".",
+            this
+        );
     }
 
     private void BuildPopulationFromSavedTop(
         List<Genome> savedTop,
         bool resetFitness)
     {
+        int protectedCount =
+            Mathf.Min(
+                ProtectedCompletedCopies,
+                populationSize
+            );
+
+        if (bestCompletedGenome != null)
+        {
+            for (int i = 0;
+                 i < protectedCount &&
+                 population.Count < populationSize;
+                 i++)
+            {
+                population.Add(
+                    CloneGenome(
+                        bestCompletedGenome
+                    )
+                );
+            }
+        }
+
+        int progressProtectedCount =
+            Mathf.Min(
+                ProtectedProgressCopies,
+                populationSize - population.Count
+            );
+
+        Genome progressGenomeToProtect =
+            bestAlternativeProgressGenome;
+
+        if (progressGenomeToProtect == null &&
+            bestProgressGenome != null &&
+            (bestCompletedGenome == null ||
+             !AreGenomesStructurallyEqual(
+                 bestProgressGenome,
+                 bestCompletedGenome
+             )))
+        {
+            progressGenomeToProtect =
+                bestProgressGenome;
+        }
+
+        if (progressGenomeToProtect != null)
+        {
+            for (int i = 0;
+                 i < progressProtectedCount &&
+                 population.Count < populationSize;
+                 i++)
+            {
+                population.Add(
+                    CloneGenome(
+                        progressGenomeToProtect
+                    )
+                );
+            }
+        }
+
+        int savedEliteCount =
+            Mathf.Min(
+                maxEliteSpecies,
+                savedTop.Count,
+                populationSize - population.Count
+            );
+
         for (int i = 0;
-             i < savedTop.Count &&
-             population.Count < populationSize;
+             i < savedEliteCount;
              i++)
         {
             SanitizeNetwork(
                 savedTop[i].network
             );
 
-            Genome clone =
+            population.Add(
                 CloneGenome(
                     savedTop[i]
-                );
-
-            if (resetFitness)
-            {
-                clone.fitness = 0f;
-            }
-
-            population.Add(clone);
+                )
+            );
         }
 
         RegisterExistingInnovations(
             population
         );
 
+        List<Genome> breedingPool =
+            new List<Genome>();
+
+        for (int i = 0;
+             i < savedTop.Count;
+             i++)
+        {
+            if (savedTop[i] != null &&
+                savedTop[i].network != null)
+            {
+                SanitizeNetwork(
+                    savedTop[i].network
+                );
+
+                breedingPool.Add(
+                    savedTop[i]
+                );
+            }
+        }
+
+        if (bestCompletedGenome != null)
+        {
+            breedingPool.Add(
+                bestCompletedGenome
+            );
+        }
+
+        if (bestProgressGenome != null)
+        {
+            breedingPool.Add(
+                bestProgressGenome
+            );
+        }
+
+        if (bestAlternativeProgressGenome != null)
+        {
+            breedingPool.Add(
+                bestAlternativeProgressGenome
+            );
+        }
+
         while (population.Count < populationSize)
         {
             Genome parentA =
                 SelectParentByTournament(
-                    population,
-                    Mathf.Max(2, tournamentSize)
+                    breedingPool,
+                    Mathf.Max(3, tournamentSize)
                 );
 
             Genome parentB =
                 SelectParentByTournament(
-                    population,
-                    Mathf.Max(2, tournamentSize)
+                    breedingPool,
+                    Mathf.Max(3, tournamentSize)
                 );
 
             Genome child;
 
-            if (population.Count > 1 &&
+            if (breedingPool.Count > 1 &&
                 Random.value < crossoverRate)
             {
                 child =
@@ -726,46 +2114,6 @@ public class EvolutionManager : MonoBehaviour
                  i++)
             {
                 population[i].fitness = 0f;
-            }
-        }
-    }
-
-    private void RemoveGenerationsAfterRollback()
-    {
-        string[] files =
-            Directory.GetFiles(
-                saveFolderPath,
-                "gen_*_top10.json"
-            );
-
-        for (int i = 0;
-             i < files.Length;
-             i++)
-        {
-            string fileName =
-                Path.GetFileNameWithoutExtension(
-                    files[i]
-                );
-
-            if (!fileName.StartsWith("gen_") ||
-                !fileName.EndsWith("_top10"))
-            {
-                continue;
-            }
-
-            string numberPart =
-                fileName.Substring(
-                    4,
-                    fileName.Length - 10
-                );
-
-            if (int.TryParse(
-                    numberPart,
-                    out int generation
-                ) &&
-                generation > RollbackGeneration)
-            {
-                File.Delete(files[i]);
             }
         }
     }
@@ -860,7 +2208,18 @@ public class EvolutionManager : MonoBehaviour
 
     private void NextGeneration()
     {
+        if (useManualNetworkPopulation)
+        {
+            generationCount++;
+            FillManualNetworkPopulation();
+            StartGeneration();
+            return;
+        }
+
         UpdateHistoricalBestFitness();
+        UpdateBestCompletedGenome();
+        UpdateBestProgressGenome();
+        SaveGenerationResult();
 
         Genome best =
             GetBestGenome();
@@ -904,11 +2263,70 @@ public class EvolutionManager : MonoBehaviour
         List<Genome> newPopulation =
             new List<Genome>();
 
+        if (bestCompletedGenome != null)
+        {
+            for (int i = 0;
+                 i < ProtectedCompletedCopies &&
+                 newPopulation.Count < populationSize;
+                 i++)
+            {
+                newPopulation.Add(
+                    CloneGenome(
+                        bestCompletedGenome
+                    )
+                );
+            }
+        }
+
+        Genome progressGenomeToProtect =
+            bestAlternativeProgressGenome;
+
+        if (progressGenomeToProtect == null &&
+            bestProgressGenome != null &&
+            (bestCompletedGenome == null ||
+             !AreGenomesStructurallyEqual(
+                 bestProgressGenome,
+                 bestCompletedGenome
+             )))
+        {
+            progressGenomeToProtect =
+                bestProgressGenome;
+        }
+
+        if (progressGenomeToProtect != null)
+        {
+            for (int i = 0;
+                 i < ProtectedProgressCopies &&
+                 newPopulation.Count < populationSize;
+                 i++)
+            {
+                newPopulation.Add(
+                    CloneGenome(
+                        progressGenomeToProtect
+                    )
+                );
+            }
+        }
+
+        if (newPopulation.Count == 0 &&
+            historicalBestGenome != null)
+        {
+            newPopulation.Add(
+                CloneGenome(
+                    historicalBestGenome
+                )
+            );
+        }
+
+        int remainingEliteSlots =
+            populationSize -
+            newPopulation.Count;
+
         int eliteSpeciesCount =
             Mathf.Min(
                 maxEliteSpecies,
                 species.Count,
-                populationSize
+                remainingEliteSlots
             );
 
         for (int i = 0;
@@ -956,8 +2374,7 @@ public class EvolutionManager : MonoBehaviour
             Genome child;
 
             if (selectedSpecies.members.Count > 1 &&
-                Random.value <
-                crossoverRate)
+                Random.value < crossoverRate)
             {
                 child =
                     Crossover(
@@ -981,7 +2398,9 @@ public class EvolutionManager : MonoBehaviour
                populationSize)
         {
             Genome child =
-                CloneGenome(best);
+                CloneGenome(
+                    best
+                );
 
             Mutate(child);
 
@@ -1556,6 +2975,102 @@ public class EvolutionManager : MonoBehaviour
         return best;
     }
 
+    private bool AreGenomesStructurallyEqual(
+        Genome a,
+        Genome b)
+    {
+        if (a == null ||
+            b == null ||
+            a.network == null ||
+            b.network == null)
+        {
+            return false;
+        }
+
+        NeuralNetwork networkA =
+            a.network;
+
+        NeuralNetwork networkB =
+            b.network;
+
+        if (networkA.nodes == null ||
+            networkB.nodes == null ||
+            networkA.connections == null ||
+            networkB.connections == null)
+        {
+            return false;
+        }
+
+        if (networkA.nodes.Count !=
+            networkB.nodes.Count ||
+            networkA.connections.Count !=
+            networkB.connections.Count)
+        {
+            return false;
+        }
+
+        for (int i = 0;
+             i < networkA.nodes.Count;
+             i++)
+        {
+            NEATNode nodeA =
+                networkA.nodes[i];
+
+            NEATNode nodeB =
+                networkB.nodes[i];
+
+            if (nodeA == null ||
+                nodeB == null)
+            {
+                return false;
+            }
+
+            if (nodeA.id != nodeB.id ||
+                nodeA.type != nodeB.type ||
+                nodeA.layer != nodeB.layer)
+            {
+                return false;
+            }
+        }
+
+        for (int i = 0;
+             i < networkA.connections.Count;
+             i++)
+        {
+            NEATConnection connectionA =
+                networkA.connections[i];
+
+            NEATConnection connectionB =
+                networkB.connections[i];
+
+            if (connectionA == null ||
+                connectionB == null ||
+                connectionA.fromNode == null ||
+                connectionA.toNode == null ||
+                connectionB.fromNode == null ||
+                connectionB.toNode == null)
+            {
+                return false;
+            }
+
+            if (connectionA.fromNode.id !=
+                connectionB.fromNode.id ||
+                connectionA.toNode.id !=
+                connectionB.toNode.id ||
+                connectionA.innovation !=
+                connectionB.innovation ||
+                connectionA.enabled !=
+                connectionB.enabled ||
+                connectionA.weight !=
+                connectionB.weight)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private Genome CloneGenome(
         Genome parent)
     {
@@ -1573,6 +3088,9 @@ public class EvolutionManager : MonoBehaviour
 
         NeuralNetwork newNetwork =
             new NeuralNetwork();
+
+        newNetwork.manualNavigation =
+            parent.network.manualNavigation;
 
         Dictionary<int, NEATNode>
             nodeMap =
@@ -1640,9 +3158,15 @@ public class EvolutionManager : MonoBehaviour
             );
         }
 
-        return new Genome(
-            newNetwork
-        );
+        Genome clonedGenome =
+            new Genome(
+                newNetwork
+            );
+
+        clonedGenome.fitness =
+            parent.fitness;
+
+        return clonedGenome;
     }
 
     private void Mutate(
@@ -1818,8 +3342,7 @@ public class EvolutionManager : MonoBehaviour
             if (ConnectionExists(
                     genome,
                     from.id,
-                    to.id
-                ))
+                    to.id))
             {
                 continue;
             }
@@ -1913,8 +3436,7 @@ public class EvolutionManager : MonoBehaviour
 
         if (FindNodeById(
                 genome.network,
-                newNodeId
-            ) != null)
+                newNodeId) != null)
         {
             return;
         }
@@ -1922,10 +3444,8 @@ public class EvolutionManager : MonoBehaviour
         selected.enabled = false;
 
         float newLayer =
-            (
-                selected.fromNode.layer +
-                selected.toNode.layer
-            ) *
+            (selected.fromNode.layer +
+             selected.toNode.layer) *
             0.5f;
 
         NEATNode newNode =
@@ -2030,7 +3550,7 @@ public class EvolutionManager : MonoBehaviour
     {
         Dictionary<int, NEATConnection>
             result =
-                new Dictionary<int, NEATConnection>();
+            new Dictionary<int, NEATConnection>();
 
         if (genome == null ||
             genome.network == null ||
@@ -2407,14 +3927,15 @@ public class EvolutionManager : MonoBehaviour
             }
         }
 
-        EnsureBasicNodes(
-            network,
-            nodeMap
-        );
+        if (!network.manualNavigation)
+        {
+            EnsureBasicNodes(
+                network,
+                nodeMap
+            );
 
-        EnsureDirectionInputConnections(
-            network
-        );
+            EnsureDirectionInputConnections(network);
+        }
     }
 
     private void EnsureDirectionInputConnections(
@@ -2484,12 +4005,6 @@ public class EvolutionManager : MonoBehaviour
         NeuralNetwork network,
         int id)
     {
-        if (network == null ||
-            network.nodes == null)
-        {
-            return null;
-        }
-
         for (int i = 0;
              i < network.nodes.Count;
              i++)
@@ -2546,14 +4061,38 @@ public class EvolutionManager : MonoBehaviour
         save.generation =
             genNumber;
 
+        save.ghostCount =
+            stageGhostCount;
+
+        save.maxFitness =
+            GetCurrentGenerationMaxFitness();
+
+        save.completionCount =
+            GetCurrentCompletedCount();
+
+        save.completed =
+            save.completionCount > 0;
+
+        save.bestCompletionTime =
+            GetCurrentBestCompletionTime();
+
+        save.minimumPelletsRemaining =
+            GetCurrentMinimumPelletsRemaining();
+
         for (int i = 0;
              i < count;
              i++)
         {
-            save.genomes.Add(
+            Genome savedGenome =
                 CloneGenome(
                     sorted[i]
-                )
+                );
+
+            savedGenome.fitness =
+                sorted[i].fitness;
+
+            save.genomes.Add(
+                savedGenome
             );
         }
 
@@ -2575,48 +4114,6 @@ public class EvolutionManager : MonoBehaviour
             filePath,
             json
         );
-    }
-
-    private List<Genome> LoadTopGenomesFromFolder(
-        string folderName,
-        int genNumber)
-    {
-        string folderPath =
-            Path.Combine(
-                Application.persistentDataPath,
-                folderName
-            );
-
-        string filePath =
-            Path.Combine(
-                folderPath,
-                "gen_" +
-                genNumber.ToString("D5") +
-                "_top10.json"
-            );
-
-        if (!File.Exists(filePath))
-        {
-            return null;
-        }
-
-        string json =
-            File.ReadAllText(
-                filePath
-            );
-
-        GenerationSave save =
-            JsonUtility.FromJson<GenerationSave>(
-                json
-            );
-
-        if (save == null ||
-            save.genomes == null)
-        {
-            return null;
-        }
-
-        return save.genomes;
     }
 
     private List<Genome> LoadTopGenomes(
@@ -2654,6 +4151,136 @@ public class EvolutionManager : MonoBehaviour
         return save.genomes;
     }
 
+    private int GetBestSeedGenerationForCurrentStage()
+    {
+        if (!Directory.Exists(saveFolderPath))
+        {
+            return -1;
+        }
+
+        string[] files =
+            Directory.GetFiles(
+                saveFolderPath,
+                "gen_*_top10.json"
+            );
+
+        int latestSameStage = -1;
+        int closestLowerStage = -1;
+        int latestClosestLowerStage = -1;
+        int latestLegacy = -1;
+        int latestHigherStage = -1;
+        int latestAny = -1;
+
+        for (int i = 0; i < files.Length; i++)
+        {
+            if (!TryGetGenerationNumber(files[i], out int generation))
+            {
+                continue;
+            }
+
+            if (generation > latestAny)
+            {
+                latestAny = generation;
+            }
+
+            string json = File.ReadAllText(files[i]);
+            GenerationSave save =
+                JsonUtility.FromJson<GenerationSave>(json);
+
+            if (save == null || save.genomes == null || save.genomes.Count == 0)
+            {
+                continue;
+            }
+
+            int savedGhostCount =
+                json.Contains("\"ghostCount\"")
+                    ? save.ghostCount
+                    : -1;
+
+            if (savedGhostCount == stageGhostCount)
+            {
+                if (generation > latestSameStage)
+                {
+                    latestSameStage = generation;
+                }
+            }
+            else if (savedGhostCount >= 0 &&
+                     savedGhostCount < stageGhostCount)
+            {
+                if (savedGhostCount > closestLowerStage ||
+                    (savedGhostCount == closestLowerStage &&
+                     generation > latestClosestLowerStage))
+                {
+                    closestLowerStage = savedGhostCount;
+                    latestClosestLowerStage = generation;
+                }
+            }
+            else if (savedGhostCount < 0)
+            {
+                if (generation > latestLegacy)
+                {
+                    latestLegacy = generation;
+                }
+            }
+            else if (savedGhostCount > stageGhostCount)
+            {
+                if (generation > latestHigherStage)
+                {
+                    latestHigherStage = generation;
+                }
+            }
+        }
+
+        if (latestSameStage >= 0)
+        {
+            return latestSameStage;
+        }
+
+        if (latestClosestLowerStage >= 0)
+        {
+            return latestClosestLowerStage;
+        }
+
+        if (latestLegacy >= 0)
+        {
+            return latestLegacy;
+        }
+
+        if (latestHigherStage >= 0)
+        {
+            Debug.LogWarning(
+                "EvolutionManager: no se encontraron genomas guardados para esta fase ni para una fase más sencilla. Se usará como punto de partida una población de una fase con más fantasmas, sin considerarla solución completadora actual."
+            );
+            return latestHigherStage;
+        }
+
+        return latestAny;
+    }
+
+    private bool TryGetGenerationNumber(
+        string filePath,
+        out int generation)
+    {
+        generation = -1;
+
+        string fileName =
+            Path.GetFileNameWithoutExtension(filePath);
+
+        if (!fileName.StartsWith("gen_") ||
+            !fileName.EndsWith("_top10"))
+        {
+            return false;
+        }
+
+        string numberPart =
+            fileName.Substring(
+                4,
+                fileName.Length - 10
+            );
+
+        return int.TryParse(numberPart, out generation);
+    }
+
     private int GetLatestGenerationNumber()
     {
         if (!Directory.Exists(
@@ -2668,41 +4295,19 @@ public class EvolutionManager : MonoBehaviour
                 "gen_*_top10.json"
             );
 
-        int maxGeneration = 0;
+        int maxGeneration = -1;
 
         for (int i = 0;
              i < files.Length;
              i++)
         {
-            string fileName =
-                Path.GetFileNameWithoutExtension(
-                    files[i]
-                );
-
-            if (!fileName.StartsWith(
-                    "gen_") ||
-                !fileName.EndsWith(
-                    "_top10"))
-            {
-                continue;
-            }
-
-            string numberPart =
-                fileName.Substring(
-                    4,
-                    fileName.Length -
-                    10
-                );
-
-            if (int.TryParse(
-                    numberPart,
+            if (TryGetGenerationNumber(
+                    files[i],
                     out int generation))
             {
-                if (generation >
-                    maxGeneration)
+                if (generation > maxGeneration)
                 {
-                    maxGeneration =
-                        generation;
+                    maxGeneration = generation;
                 }
             }
         }

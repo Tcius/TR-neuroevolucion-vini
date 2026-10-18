@@ -1,5 +1,4 @@
 using UnityEngine;
-using TMPro;
 
 public class GameManager : MonoBehaviour
 {
@@ -22,9 +21,15 @@ public class GameManager : MonoBehaviour
 
     private void NewRound()
     {
-        foreach (Transform pellet in this.pellets)
+        if (pellets != null)
         {
-            pellet.gameObject.SetActive(true);
+            foreach (Transform pellet in pellets)
+            {
+                if (pellet != null)
+                {
+                    pellet.gameObject.SetActive(true);
+                }
+            }
         }
 
         ResetState();
@@ -33,11 +38,32 @@ public class GameManager : MonoBehaviour
     private void ResetState()
     {
         resetghostmultiplier();
-        for (int i = 0; i < ghosts.Length; i++) {
-            ghosts[i].ResetState();
+
+        if (ghosts != null)
+        {
+            for (int i = 0; i < ghosts.Length; i++)
+            {
+                Ghost ghost = ghosts[i];
+
+                if (ghost == null)
+                {
+                    continue;
+                }
+
+                if (pacman != null)
+                {
+                    ghost.target = pacman.transform;
+                }
+
+                ghost.ResetState();
+            }
         }
-        this.pacman.gameObject.SetActive(true);
-        pacman.ResetState();
+
+        if (pacman != null)
+        {
+            pacman.gameObject.SetActive(true);
+            pacman.ResetState();
+        }
     }
 
     private void SetScore(int score)
@@ -47,23 +73,56 @@ public class GameManager : MonoBehaviour
 
     public void GhostEaten(Ghost ghost)
     {
-        SetScore(
-            this.score +
-            ghost.points *
-            this.ghostMultiplier
-        );
+        if (ghost == null)
+        {
+            return;
+        }
+
+        int pointsAwarded = ghost.points * ghostMultiplier;
+
+        SetScore(this.score + pointsAwarded);
+
+        if (pacman != null)
+        {
+            AgentController agent =
+                pacman.GetComponent<AgentController>();
+
+            if (agent != null)
+            {
+                agent.RegisterGhostEaten(pointsAwarded);
+            }
+        }
 
         this.ghostMultiplier++;
-        pacman.GetComponent<AgentController>().ghostsEatenScore += 300;
     }
 
     public void PacmanEaten()
     {
-        this.pacman.gameObject.SetActive(false);
+        if (pacman == null)
+        {
+            return;
+        }
+
+        AgentController agent =
+            pacman.GetComponent<AgentController>();
+
+        if (agent != null)
+        {
+            agent.RegisterKilledByGhost();
+        }
+        else
+        {
+            pacman.gameObject.SetActive(false);
+        }
     }
 
     public void pelletEaten(Pellet pellet)
     {
+        if (pellet == null)
+        {
+            return;
+        }
+
         pellet.gameObject.SetActive(false);
 
         SetScore(
@@ -72,7 +131,9 @@ public class GameManager : MonoBehaviour
         );
 
         AgentController agent =
-            pacman.GetComponent<AgentController>();
+            pacman != null
+                ? pacman.GetComponent<AgentController>()
+                : null;
 
         if (agent != null)
         {
@@ -87,9 +148,9 @@ public class GameManager : MonoBehaviour
             {
                 agent.CompleteMaze();
             }
-            else
+            else if (pacman != null)
             {
-                this.pacman.gameObject.SetActive(false);
+                pacman.gameObject.SetActive(false);
             }
         }
     }
@@ -97,25 +158,44 @@ public class GameManager : MonoBehaviour
     public void powerPelletEaten(
         PowerPellet pellet)
     {
-        for(int i = 0; i<this.ghosts.Length; i++)
+        if (ghosts != null)
         {
-            this.ghosts[i].frightened.Enable(pellet.duration);
+            for (int i = 0; i < ghosts.Length; i++)
+            {
+                Ghost ghost = ghosts[i];
+
+                if (ghost != null &&
+                    ghost.frightened != null &&
+                    pellet != null)
+                {
+                    ghost.frightened.Enable(pellet.duration);
+                }
+            }
         }
+
         pelletEaten(pellet);
 
         CancelInvoke();
 
-        Invoke(
-            nameof(resetghostmultiplier),
-            pellet.duration
-        );
+        if (pellet != null)
+        {
+            Invoke(
+                nameof(resetghostmultiplier),
+                pellet.duration
+            );
+        }
     }
 
     private bool HasremainingPellets()
     {
-        foreach (Transform pellet in this.pellets)
+        if (pellets == null)
         {
-            if (pellet.gameObject.activeSelf)
+            return false;
+        }
+
+        foreach (Transform pellet in pellets)
+        {
+            if (pellet != null && pellet.gameObject.activeSelf)
             {
                 return true;
             }

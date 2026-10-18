@@ -11,129 +11,315 @@ public class Pacman : MonoBehaviour
     private Node currentNode;
     private bool waitingForDecision = false;
 
+    public bool allowStrategicReverse;
+
+    private const float NodeDetectionRadius = 0.2f;
+
     public bool NeedsDecision
     {
-        get { return waitingForDecision && currentNode != null; }
+        get
+        {
+            return waitingForDecision &&
+                   currentNode != null;
+        }
     }
 
     private void Awake()
     {
-        spriteRenderer = GetComponent<SpriteRenderer>();
-        circleCollider = GetComponent<CircleCollider2D>();
-        movement = GetComponent<Movement>();
+        spriteRenderer =
+            GetComponent<SpriteRenderer>();
+
+        circleCollider =
+            GetComponent<CircleCollider2D>();
+
+        movement =
+            GetComponent<Movement>();
     }
 
     private void Update()
     {
-        float angle = Mathf.Atan2(movement.direction.y, movement.direction.x);
-        transform.rotation = Quaternion.AngleAxis(angle * Mathf.Rad2Deg, Vector3.forward);
+        if (!waitingForDecision)
+        {
+            TryFindCurrentNode();
+        }
+
+        float angle =
+            Mathf.Atan2(
+                movement.direction.y,
+                movement.direction.x
+            );
+
+        transform.rotation =
+            Quaternion.AngleAxis(
+                angle * Mathf.Rad2Deg,
+                Vector3.forward
+            );
     }
 
     public void ResetState()
     {
         enabled = true;
+
         spriteRenderer.enabled = true;
         circleCollider.enabled = true;
+
         movement.ResetState();
 
         currentNode = null;
         waitingForDecision = false;
 
         gameObject.SetActive(true);
+
+        TryFindCurrentNode();
     }
 
     public void UP()
     {
-        movement.SetDirection(Vector2.up);
+        movement.SetDirection(
+            Vector2.up
+        );
     }
 
     public void DOWN()
     {
-        movement.SetDirection(Vector2.down);
+        movement.SetDirection(
+            Vector2.down
+        );
     }
 
     public void LEFT()
     {
-        movement.SetDirection(Vector2.left);
+        movement.SetDirection(
+            Vector2.left
+        );
     }
 
     public void RIGHT()
     {
-        movement.SetDirection(Vector2.right);
+        movement.SetDirection(
+            Vector2.right
+        );
     }
 
-    public void ProcessOutputs(float[] outputs)
+    public void ProcessOutputs(
+        float[] outputs)
     {
-        if (!NeedsDecision) return;
-        if (outputs == null || outputs.Length < 4) return;
-        if (currentNode.availableDirections == null || currentNode.availableDirections.Count == 0) return;
-
-        Vector2 currentDirection = movement.direction;
-
-        if (currentDirection == Vector2.zero)
+        if (!NeedsDecision)
         {
-            currentDirection = movement.initialDirection;
+            return;
+        }
+
+        if (outputs == null ||
+            outputs.Length < 4)
+        {
+            return;
+        }
+
+        if (currentNode.availableDirections == null ||
+            currentNode.availableDirections.Count == 0)
+        {
+            return;
+        }
+
+        Vector2 currentDirection =
+            movement.direction;
+
+        if (currentDirection ==
+            Vector2.zero)
+        {
+            currentDirection =
+                movement.initialDirection;
         }
 
         Vector2[] possibleDirections =
         {
             currentDirection,
-            new Vector2(-currentDirection.y, currentDirection.x),
-            new Vector2(currentDirection.y, -currentDirection.x),
+            new Vector2(
+                -currentDirection.y,
+                currentDirection.x
+            ),
+            new Vector2(
+                currentDirection.y,
+                -currentDirection.x
+            ),
             -currentDirection
         };
 
-        bool hasNonReverseOption = false;
+        bool hasNonReverseOption =
+            false;
 
-        for (int i = 0; i < 3; i++)
+        for (int i = 0;
+             i < 3;
+             i++)
         {
-            if (currentNode.availableDirections.Contains(possibleDirections[i]))
+            if (currentNode.availableDirections.Contains(
+                    possibleDirections[i]
+                ))
             {
-                hasNonReverseOption = true;
+                hasNonReverseOption =
+                    true;
+
                 break;
             }
         }
 
-        int bestOutputIndex = -1;
-        float bestOutputValue = float.MinValue;
+        int bestOutputIndex =
+            -1;
 
-        for (int i = 0; i < 4; i++)
+        float bestOutputValue =
+            float.MinValue;
+
+        for (int i = 0;
+             i < 4;
+             i++)
         {
-            Vector2 targetDirection = possibleDirections[i];
+            Vector2 targetDirection =
+                possibleDirections[i];
 
-            if (!currentNode.availableDirections.Contains(targetDirection))
+            if (!currentNode.availableDirections.Contains(
+                    targetDirection
+                ))
             {
                 continue;
             }
 
-            if (i == 3 && hasNonReverseOption)
+            if (i == 3 &&
+                hasNonReverseOption &&
+                !allowStrategicReverse)
             {
                 continue;
             }
 
-            if (outputs[i] > bestOutputValue)
+            if (outputs[i] >
+                bestOutputValue)
             {
-                bestOutputValue = outputs[i];
-                bestOutputIndex = i;
+                bestOutputValue =
+                    outputs[i];
+
+                bestOutputIndex =
+                    i;
             }
         }
 
         if (bestOutputIndex >= 0)
         {
-            movement.SetDirection(possibleDirections[bestOutputIndex]);
+            movement.SetDirection(
+                possibleDirections[
+                    bestOutputIndex
+                ]
+            );
         }
 
         waitingForDecision = false;
     }
 
-    private void OnTriggerEnter2D(Collider2D other)
+    private void OnTriggerEnter2D(
+        Collider2D other)
     {
-        Node node = other.GetComponent<Node>();
+        Node node =
+            GetNodeFromCollider(
+                other
+            );
 
-        if (node != null)
+        if (node != null &&
+            node != currentNode)
         {
             currentNode = node;
             waitingForDecision = true;
         }
+    }
+
+    private void OnTriggerStay2D(
+        Collider2D other)
+    {
+        Node node =
+            GetNodeFromCollider(
+                other
+            );
+
+        if (node != null &&
+            node != currentNode)
+        {
+            currentNode = node;
+            waitingForDecision = true;
+        }
+    }
+
+    private void TryFindCurrentNode()
+    {
+        Collider2D[] colliders =
+            Physics2D.OverlapCircleAll(
+                transform.position,
+                NodeDetectionRadius
+            );
+
+        Node closestNode =
+            null;
+
+        float closestDistance =
+            float.MaxValue;
+
+        for (int i = 0;
+             i < colliders.Length;
+             i++)
+        {
+            Node node =
+                GetNodeFromCollider(
+                    colliders[i]
+                );
+
+            if (node == null ||
+                node == currentNode)
+            {
+                continue;
+            }
+
+            float distance =
+                Vector2.Distance(
+                    transform.position,
+                    colliders[i].ClosestPoint(
+                        transform.position
+                    )
+                );
+
+            if (distance <
+                closestDistance)
+            {
+                closestDistance =
+                    distance;
+
+                closestNode =
+                    node;
+            }
+        }
+
+        if (closestNode != null)
+        {
+            currentNode =
+                closestNode;
+
+            waitingForDecision =
+                true;
+        }
+    }
+
+    private Node GetNodeFromCollider(
+        Collider2D collider)
+    {
+        if (collider == null)
+        {
+            return null;
+        }
+
+        Node node =
+            collider.GetComponent<Node>();
+
+        if (node == null)
+        {
+            node =
+                collider.GetComponentInParent<Node>();
+        }
+
+        return node;
     }
 }

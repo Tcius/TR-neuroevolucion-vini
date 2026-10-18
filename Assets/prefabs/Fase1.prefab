@@ -12,6 +12,10 @@ PrefabInstance:
       propertyPath: m_IsActive
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: 4381696916634120300, guid: 5b3954805b5a8a34595187b7a45941c6, type: 3}
+      propertyPath: ghosts.Array.size
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 5565774956083266385, guid: 5b3954805b5a8a34595187b7a45941c6, type: 3}
       propertyPath: m_IsActive
       value: 0

@@ -1,0 +1,276 @@
+{
+  "nodes": [
+    {
+      "id": 0,
+      "type": "Input",
+      "layer": 0.0
+    },
+    {
+      "id": 1,
+      "type": "Input",
+      "layer": 0.0
+    },
+    {
+      "id": 2,
+      "type": "Input",
+      "layer": 0.0
+    },
+    {
+      "id": 3,
+      "type": "Input",
+      "layer": 0.0
+    },
+    {
+      "id": 4,
+      "type": "Input",
+      "layer": 0.0
+    },
+    {
+      "id": 5,
+      "type": "Input",
+      "layer": 0.0
+    },
+    {
+      "id": 6,
+      "type": "Input",
+      "layer": 0.0
+    },
+    {
+      "id": 7,
+      "type": "Input",
+      "layer": 0.0
+    },
+    {
+      "id": 8,
+      "type": "Input",
+      "layer": 0.0
+    },
+    {
+      "id": 9,
+      "type": "Input",
+      "layer": 0.0
+    },
+    {
+      "id": 10,
+      "type": "Input",
+      "layer": 0.0
+    },
+    {
+      "id": 11,
+      "type": "Input",
+      "layer": 0.0
+    },
+    {
+      "id": 12,
+      "type": "Input",
+      "layer": 0.0
+    },
+    {
+      "id": 13,
+      "type": "Input",
+      "layer": 0.0
+    },
+    {
+      "id": 14,
+      "type": "Output",
+      "layer": 10.0
+    },
+    {
+      "id": 15,
+      "type": "Output",
+      "layer": 10.0
+    },
+    {
+      "id": 16,
+      "type": "Output",
+      "layer": 10.0
+    },
+    {
+      "id": 17,
+      "type": "Output",
+      "layer": 10.0
+    },
+    {
+      "id": 18,
+      "type": "Hidden",
+      "layer": 1.0
+    },
+    {
+      "id": 19,
+      "type": "Hidden",
+      "layer": 1.0
+    },
+    {
+      "id": 20,
+      "type": "Hidden",
+      "layer": 1.0
+    },
+    {
+      "id": 21,
+      "type": "Hidden",
+      "layer": 1.0
+    },
+    {
+      "id": 22,
+      "type": "Hidden",
+      "layer": 1.0
+    },
+    {
+      "id": 23,
+      "type": "Hidden",
+      "layer": 1.0
+    },
+    {
+      "id": 24,
+      "type": "Hidden",
+      "layer": 1.0
+    },
+    {
+      "id": 25,
+      "type": "Hidden",
+      "layer": 1.0
+    },
+    {
+      "id": 26,
+      "type": "Hidden",
+      "layer": 2.0
+    },
+    {
+      "id": 27,
+      "type": "Hidden",
+      "layer": 2.0
+    },
+    {
+      "id": 28,
+      "type": "Hidden",
+      "layer": 2.0
+    },
+    {
+      "id": 29,
+      "type": "Hidden",
+      "layer": 2.0
+    }
+  ],
+  "connections": [
+    {
+      "fromNodeId": 8,
+      "toNodeId": 18,
+      "weight": 2.5,
+      "disabled": false
+    },
+    {
+      "fromNodeId": 4,
+      "toNodeId": 22,
+      "weight": 2.5,
+      "disabled": false
+    },
+    {
+      "fromNodeId": 9,
+      "toNodeId": 19,
+      "weight": 2.5,
+      "disabled": false
+    },
+    {
+      "fromNodeId": 6,
+      "toNodeId": 23,
+      "weight": 2.5,
+      "disabled": false
+    },
+    {
+      "fromNodeId": 10,
+      "toNodeId": 20,
+      "weight": 2.5,
+      "disabled": false
+    },
+    {
+      "fromNodeId": 7,
+      "toNodeId": 24,
+      "weight": 2.5,
+      "disabled": false
+    },
+    {
+      "fromNodeId": 11,
+      "toNodeId": 21,
+      "weight": 2.5,
+      "disabled": false
+    },
+    {
+      "fromNodeId": 5,
+      "toNodeId": 25,
+      "weight": 2.5,
+      "disabled": false
+    },
+    {
+      "fromNodeId": 18,
+      "toNodeId": 26,
+      "weight": 3.0,
+      "disabled": false
+    },
+    {
+      "fromNodeId": 22,
+      "toNodeId": 26,
+      "weight": -6.0,
+      "disabled": false
+    },
+    {
+      "fromNodeId": 26,
+      "toNodeId": 14,
+      "weight": 2.0,
+      "disabled": false
+    },
+    {
+      "fromNodeId": 19,
+      "toNodeId": 27,
+      "weight": 3.0,
+      "disabled": false
+    },
+    {
+      "fromNodeId": 23,
+      "toNodeId": 27,
+      "weight": -6.0,
+      "disabled": false
+    },
+    {
+      "fromNodeId": 27,
+      "toNodeId": 15,
+      "weight": 2.0,
+      "disabled": false
+    },
+    {
+      "fromNodeId": 20,
+      "toNodeId": 28,
+      "weight": 3.0,
+      "disabled": false
+    },
+    {
+      "fromNodeId": 24,
+      "toNodeId": 28,
+      "weight": -6.0,
+      "disabled": false
+    },
+    {
+      "fromNodeId": 28,
+      "toNodeId": 16,
+      "weight": 2.0,
+      "disabled": false
+    },
+    {
+      "fromNodeId": 21,
+      "toNodeId": 29,
+      "weight": 3.0,
+      "disabled": false
+    },
+    {
+      "fromNodeId": 25,
+      "toNodeId": 29,
+      "weight": -6.0,
+      "disabled": false
+    },
+    {
+      "fromNodeId": 29,
+      "toNodeId": 17,
+      "weight": 2.0,
+      "disabled": false
+    }
+  ]
+}

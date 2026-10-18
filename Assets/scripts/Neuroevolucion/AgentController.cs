@@ -1,339 +1,710 @@
 using System.Collections.Generic;
+
 using UnityEngine;
 
 public class AgentController : MonoBehaviour
+
 {
+
     private Pacman pacmanScript;
+
+    private PacmanSensors pacmanSensors;
+
     private GameManager gameManager;
+
     private EvolutionManager.Genome myGenomePrivate;
+
     private float timeAlive = 0f;
+
     private int individualScore = 0;
+
     private bool isDead = false;
+
     private bool completedMaze = false;
 
     private HashSet<Vector2Int> visitedTiles = new HashSet<Vector2Int>();
+
     private float timeSinceLastProgress = 0f;
+
     private int newTilesVisited = 0;
+
     private bool diedFromStagnation = false;
 
+    private float ghostDeathPenalty = 0f;
+
+    private int minimumPelletsRemaining = int.MaxValue;
+
+    private float completionProgressReward = 0f;
+
     private const float MaxTimeWithoutProgress = 15f;
-    private const float StagnationPenalty = 100f;
+
+    private const float MaxTimeWithoutProgressNearEnd = 25f;
+
+    private const float MaxTimeWithoutProgressFinal = 40f;
+
+    private const int NearEndPelletThreshold = 10;
+
+    private const int FinalPelletThreshold = 4;
+
+    private const float MaxStagnationPenalty = 500f;
+
+    private const float StagnationPenaltyZeroTime = 30f;
+
     private const float CompletionReward = 5000f;
 
-    public int ghostsEatenScore = 0;
+    private const float CompletionTimePenaltyPerSecond = 0f;
+
+    private const float GhostDeathMaxPenalty = 2500f;
+    private const float GhostDeathMinPenalty = 250f;
+    private const float GhostDeathPenaltyReferenceTime = 100f;
+
+    private const float CompletionProgressRewardMax = 4000f;
+
+    private const float CompletionProgressRewardScale = 12f;
 
     public EvolutionManager.Genome MyGenome
+
     {
+
         get { return myGenomePrivate; }
+
     }
 
     public bool HasCompletedMaze
+
     {
+
         get { return completedMaze; }
+
     }
 
     public void Setup(EvolutionManager.Genome genome)
+
     {
+
         pacmanScript = GetComponent<Pacman>();
+
+        pacmanSensors = GetComponent<PacmanSensors>();
+
+        if (pacmanSensors == null)
+
+        {
+
+            pacmanSensors = gameObject.AddComponent<PacmanSensors>();
+
+        }
+
         gameManager = GetComponentInParent<GameManager>();
+
         myGenomePrivate = genome;
+
+        if (pacmanScript != null)
+        {
+            pacmanScript.allowStrategicReverse =
+                myGenomePrivate != null &&
+                myGenomePrivate.network != null &&
+                myGenomePrivate.network.manualNavigation;
+        }
+
+        if (myGenomePrivate != null)
+
+        {
+
+            myGenomePrivate.fitness = 0f;
+
+        }
+
         timeAlive = 0f;
+
         individualScore = 0;
-        ghostsEatenScore = 0;
+
         isDead = false;
+
         completedMaze = false;
+
         diedFromStagnation = false;
+
+        ghostDeathPenalty = 0f;
 
         visitedTiles.Clear();
 
         Vector2Int startingTile = GetCurrentTile();
+
         visitedTiles.Add(startingTile);
 
         timeSinceLastProgress = 0f;
+
         newTilesVisited = 0;
+
+        minimumPelletsRemaining = int.MaxValue;
+
+        completionProgressReward = 0f;
+
+        UpdateMinimumPelletsRemaining();
+
+        UpdateCompletionProgressReward();
+
     }
 
     private void Update()
+
     {
-        if (isDead) return;
+
+        if (isDead || myGenomePrivate == null)
+
+        {
+
+            return;
+
+        }
 
         timeAlive += Time.deltaTime;
+
         timeSinceLastProgress += Time.deltaTime;
+
+        UpdateMinimumPelletsRemaining();
+
+        UpdateCompletionProgressReward();
 
         Vector2Int currentTile = GetCurrentTile();
 
         if (visitedTiles.Add(currentTile))
+
         {
+
             newTilesVisited++;
+
             timeSinceLastProgress = 0f;
+
         }
 
-        if (timeSinceLastProgress >= MaxTimeWithoutProgress)
+        float currentMaxTimeWithoutProgress = GetCurrentMaxTimeWithoutProgress();
+
+        if (timeSinceLastProgress >= currentMaxTimeWithoutProgress)
+
         {
+
             diedFromStagnation = true;
+
             UpdateFitness();
+
             Die();
+
             return;
+
         }
 
         if (pacmanScript != null && pacmanScript.NeedsDecision)
+
         {
+
             float[] inputs = GetSensorInputs();
-            float[] outputs =
-                myGenomePrivate.network.FeedForward(inputs, 4);
+
+            float[] outputs = myGenomePrivate.network.FeedForward(inputs, 4);
 
             pacmanScript.ProcessOutputs(outputs);
+
         }
 
         UpdateFitness();
+
     }
 
     private float[] GetSensorInputs()
+
     {
-        float[] inputs = new float[14];
 
-        Vector2[] directions =
+        if (pacmanSensors == null)
+
         {
-            Vector2.up,
-            Vector2.down,
-            Vector2.left,
-            Vector2.right
-        };
 
-        LayerMask obstacleMask =
-            LayerMask.GetMask("Obstacle");
+            pacmanSensors = GetComponent<PacmanSensors>();
 
-        float maxDistance = 10f;
+            if (pacmanSensors == null)
 
-        for (int i = 0; i < 4; i++)
-        {
-            RaycastHit2D hit =
-                Physics2D.Raycast(
-                    transform.position,
-                    directions[i],
-                    maxDistance,
-                    obstacleMask
-                );
-
-            if (hit.collider != null)
             {
-                inputs[i] =
-                    hit.distance / maxDistance;
+
+                pacmanSensors = gameObject.AddComponent<PacmanSensors>();
+
             }
-            else
-            {
-                inputs[i] = 1f;
-            }
+
         }
 
-        inputs[4] = 0f;
-        inputs[5] = 0f;
-        inputs[6] = 0f;
-        inputs[7] = 0f;
-
-        inputs[8] = 0f;
-        inputs[9] = 0f;
-
-        GameObject closestPellet =
-            FindClosestWithTag("Pellet");
-
-        if (closestPellet != null)
+        if (myGenomePrivate != null &&
+            myGenomePrivate.network != null &&
+            myGenomePrivate.network.manualNavigation)
         {
-            Vector2 diff =
-                (
-                    closestPellet.transform.position -
-                    transform.position
-                ).normalized;
-
-            inputs[8] = diff.x;
-            inputs[9] = diff.y;
+            return pacmanSensors.GetManualInputs();
         }
 
-        inputs[10] = 0f;
-        inputs[11] = 0f;
+        GameObject closestPellet = FindClosestWithTag("Pellet");
 
-        GameObject closestPowerPellet =
-            FindClosestWithTag("PowerPellet");
+        GameObject closestPowerPellet = FindClosestWithTag("PowerPellet");
 
-        if (closestPowerPellet != null)
-        {
-            Vector2 diffPower =
-                (
-                    closestPowerPellet.transform.position -
-                    transform.position
-                ).normalized;
+        return pacmanSensors.GetInputs(
 
-            inputs[10] = diffPower.x;
-            inputs[11] = diffPower.y;
-        }
+            closestPellet != null ? closestPellet.transform : null,
 
-        inputs[12] = 0f;
+            closestPowerPellet != null ? closestPowerPellet.transform : null
 
-        Vector2 currentDirection = pacmanScript != null
-            ? pacmanScript.GetComponent<Movement>().direction
-            : Vector2.zero;
+        );
 
-        if (currentDirection == Vector2.zero && pacmanScript != null)
-        {
-            currentDirection = pacmanScript.GetComponent<Movement>().initialDirection;
-        }
-
-        float angle = Mathf.Atan2(currentDirection.y, currentDirection.x);
-        inputs[13] = angle / Mathf.PI;
-
-        return inputs;
     }
 
     private GameObject FindClosestWithTag(string tag)
+
     {
+
         if (gameManager == null)
+
         {
+
             gameManager = GetComponentInParent<GameManager>();
+
         }
 
-        if (gameManager == null ||
-            gameManager.pellets == null)
+        if (gameManager == null || gameManager.pellets == null)
+
         {
+
             return null;
+
         }
 
         GameObject closest = null;
+
         float minDistance = Mathf.Infinity;
 
-        Vector3 currentPos =
-            transform.position;
+        Vector3 currentPos = transform.position;
 
         foreach (Transform pellet in gameManager.pellets)
+
         {
+
             if (pellet == null ||
+
                 !pellet.gameObject.activeInHierarchy ||
+
                 !pellet.CompareTag(tag))
+
             {
+
                 continue;
+
             }
 
-            float distance =
-                Vector3.Distance(
-                    pellet.position,
-                    currentPos
-                );
+            float distance = Vector3.Distance(
 
-            if (distance < minDistance &&
-                distance < 15f)
+                pellet.position,
+
+                currentPos
+
+            );
+
+            if (distance < minDistance && distance < 15f)
+
             {
+
                 closest = pellet.gameObject;
+
                 minDistance = distance;
+
             }
+
         }
 
         return closest;
+
     }
 
     private void UpdateFitness()
+
     {
+
+        if (myGenomePrivate == null)
+
+        {
+
+            return;
+
+        }
+
+        float stagnationPenalty = 0f;
+
+        if (diedFromStagnation)
+
+        {
+
+            float survivalFactor = Mathf.Clamp01(
+
+                timeAlive / StagnationPenaltyZeroTime
+
+            );
+
+            stagnationPenalty = MaxStagnationPenalty * (
+
+                1f - survivalFactor
+
+            );
+
+        }
+
+        float completionTimePenalty = completedMaze
+
+            ? timeAlive * CompletionTimePenaltyPerSecond
+
+            : 0f;
+
         myGenomePrivate.fitness =
+
             individualScore
+
             + (newTilesVisited * 2f)
+
             + (completedMaze ? CompletionReward : 0f)
-            + ghostsEatenScore
-            - (diedFromStagnation ? StagnationPenalty : 0f);
+
+            - stagnationPenalty
+
+            + completionProgressReward
+
+            - ghostDeathPenalty
+
+            - completionTimePenalty;
+
     }
 
     public void CompleteMaze()
+
     {
-        if (isDead) return;
+
+        if (isDead)
+
+        {
+
+            return;
+
+        }
 
         completedMaze = true;
-        diedFromStagnation = false;
-        Debug.Log("Maze completed by agent: " + FindAnyObjectByType<EvolutionManager>().generationCount);
-        UpdateFitness();
-        Die();
-    }
 
-    private Vector2Int GetCurrentTile()
-    {
-        return new Vector2Int(
-            Mathf.RoundToInt(transform.position.x),
-            Mathf.RoundToInt(transform.position.y)
-        );
+        diedFromStagnation = false;
+
+        ghostDeathPenalty = 0f;
+
+        EvolutionManager evolutionManager =
+
+            FindAnyObjectByType<EvolutionManager>();
+
+        if (evolutionManager != null)
+
+        {
+
+            Debug.Log(
+
+                "Maze completed by agent: " +
+
+                evolutionManager.generationCount
+
+            );
+
+        }
+
+        UpdateFitness();
+
+        Die();
+
     }
 
     public void RegisterPelletEaten(int points)
+
     {
-        if (isDead) return;
+
+        if (isDead)
+
+        {
+
+            return;
+
+        }
 
         individualScore += points;
+
         timeSinceLastProgress = 0f;
+
+        UpdateMinimumPelletsRemaining();
+
+        UpdateFitness();
+
+    }
+
+    public void RegisterGhostEaten(int points)
+
+    {
+
+        if (isDead)
+
+        {
+
+            return;
+
+        }
+
+        individualScore += points;
+
+        timeSinceLastProgress = 0f;
+
+        UpdateMinimumPelletsRemaining();
+
+        UpdateFitness();
+
+    }
+
+    public void RegisterKilledByGhost()
+
+    {
+
+        if (isDead || completedMaze)
+
+        {
+
+            return;
+
+        }
+
+        diedFromStagnation = false;
+
+        float survivalFactor = Mathf.Clamp01(
+            timeAlive / GhostDeathPenaltyReferenceTime
+        );
+
+        ghostDeathPenalty = Mathf.Lerp(
+            GhostDeathMaxPenalty,
+            GhostDeathMinPenalty,
+            survivalFactor
+        );
+
+        UpdateFitness();
+
+        Die();
+
+    }
+
+    private float GetCurrentMaxTimeWithoutProgress()
+
+    {
+
+        int remainingPellets = GetRemainingPellets();
+
+        if (remainingPellets >= 0 &&
+
+            remainingPellets <= FinalPelletThreshold)
+
+        {
+
+            return MaxTimeWithoutProgressFinal;
+
+        }
+
+        if (remainingPellets >= 0 &&
+
+            remainingPellets <= NearEndPelletThreshold)
+
+        {
+
+            return MaxTimeWithoutProgressNearEnd;
+
+        }
+
+        return MaxTimeWithoutProgress;
+
+    }
+
+    private Vector2Int GetCurrentTile()
+
+    {
+
+        return new Vector2Int(
+
+            Mathf.RoundToInt(transform.position.x),
+
+            Mathf.RoundToInt(transform.position.y)
+
+        );
+
     }
 
     public void Die()
+
     {
+
         if (!isDead)
+
         {
+
             isDead = true;
+
             gameObject.SetActive(false);
+
         }
+
     }
 
     public float GetFitness()
+
     {
+
         return myGenomePrivate != null
+
             ? myGenomePrivate.fitness
+
             : 0f;
+
     }
 
+    public float GetCompletionTime()
 
-    public int GetRemainingPellets()
     {
-        if (gameManager == null)
+
+        return completedMaze
+
+            ? timeAlive
+
+            : -1f;
+
+    }
+
+    private void UpdateMinimumPelletsRemaining()
+
+    {
+
+        int remainingPellets = GetRemainingPellets();
+
+        if (remainingPellets >= 0 &&
+
+            remainingPellets < minimumPelletsRemaining)
+
         {
-            gameManager = GetComponentInParent<GameManager>();
+
+            minimumPelletsRemaining = remainingPellets;
+
         }
 
-        if (gameManager == null ||
-            gameManager.pellets == null)
+    }
+
+    private void UpdateCompletionProgressReward()
+
+    {
+
+        if (minimumPelletsRemaining < 0 ||
+
+            minimumPelletsRemaining == int.MaxValue)
+
         {
-            return 0;
+
+            completionProgressReward = 0f;
+
+            return;
+
+        }
+
+        completionProgressReward =
+
+            CompletionProgressRewardMax *
+
+            Mathf.Exp(
+
+                -minimumPelletsRemaining /
+
+                CompletionProgressRewardScale
+
+            );
+
+    }
+
+    public int GetMinimumPelletsRemaining()
+
+    {
+
+        return minimumPelletsRemaining == int.MaxValue
+
+            ? -1
+
+            : minimumPelletsRemaining;
+
+    }
+
+    public int GetRemainingPellets()
+
+    {
+
+        if (gameManager == null)
+
+        {
+
+            gameManager = GetComponentInParent<GameManager>();
+
+        }
+
+        if (gameManager == null || gameManager.pellets == null)
+
+        {
+
+            return -1;
+
         }
 
         int remaining = 0;
 
         foreach (Transform pellet in gameManager.pellets)
+
         {
-            if (pellet != null &&
-                pellet.gameObject.activeSelf)
+
+            if (pellet != null && pellet.gameObject.activeSelf)
+
             {
+
                 remaining++;
+
             }
+
         }
 
         return remaining;
+
     }
+
     public void SetHighlight(bool isLeader)
+
     {
-        SpriteRenderer sprite =
-            GetComponent<SpriteRenderer>();
+
+        SpriteRenderer sprite = GetComponent<SpriteRenderer>();
 
         if (sprite == null)
+
         {
-            sprite =
-                GetComponentInChildren<SpriteRenderer>();
+
+            sprite = GetComponentInChildren<SpriteRenderer>();
+
         }
 
         if (sprite != null)
+
         {
-            sprite.color =
-                isLeader
-                    ? Color.red
-                    : Color.yellow;
+
+            sprite.color = isLeader ? Color.red : Color.yellow;
+
         }
 
-        transform.localScale =
-            Vector3.one;
+        transform.localScale = Vector3.one;
+
     }
 
     public float[] GetSensorInputsForVisualizer()
+
     {
+
         return GetSensorInputs();
+
     }
+
 }
